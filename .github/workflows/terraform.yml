@@ -9,11 +9,8 @@ on: [push]
 #   pull_request:
 
 jobs:
-  terraform:
-    name: 'Terraform'
+  build:
     runs-on: ubuntu-latest
-    # permissions:
-    #   pull-requests: write
     steps:
       - uses: sarathkrish/invoke-terraform-run-api@v1.0   
         with:  
