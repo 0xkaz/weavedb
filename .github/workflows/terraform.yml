@@ -15,14 +15,14 @@ jobs:
     # permissions:
     #   pull-requests: write
     steps:
-      uses: sarathkrish/invoke-terraform-run-api@v1.0   
-      with:  
-        workSpaceName: managed-node-service
-        organizationName: WeaveDB
-        terraformToken: ${{ secrets.TFE_TOKEN }}
-        terraformHost: 'app.terraform.io'
-        isDestroy: false
-        message: 'GitHub Actions'
+      - uses: sarathkrish/invoke-terraform-run-api@v1.0   
+        with:  
+          workSpaceName: managed-node-service
+          organizationName: WeaveDB
+          terraformToken: ${{ secrets.TFE_TOKEN }}
+          terraformHost: 'app.terraform.io'
+          isDestroy: false
+          message: 'GitHub Actions'
 
 
       # - uses: kvrhdn/tfe-run@v1
