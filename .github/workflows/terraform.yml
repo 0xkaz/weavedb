@@ -12,7 +12,7 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - uses: sarathkrish/invoke-terraform-run-api@v1.0   
+      - uses: patrontech/devops-tf-cloud-run@v1.0.0
         with:  
           workSpaceName: managed-node-service
           organizationName: WeaveDB
@@ -20,7 +20,7 @@ jobs:
           terraformHost: 'app.terraform.io'
           isDestroy: false
           message: 'GitHub Actions'
-
+          startRun: false
 
       # - uses: kvrhdn/tfe-run@v1
       #   with:
