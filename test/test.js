@@ -35,7 +35,7 @@ describe("WeaveDB", function () {
   this.timeout(0)
 
   before(async () => {
-    db = await init()
+    db = await init("web")
   })
 
   after(async () => await stop())
