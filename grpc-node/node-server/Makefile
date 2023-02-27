@@ -6,7 +6,7 @@ build:
 	docker build . -t $(_NAME)
 run: 
 	docker container rm -f $(_NAME)
-	docker run  --name $(_NAME)  -p 9090:9090,9091:9091 -t $(_NAME) 
+	docker run  --name $(_NAME)  -p 9090:9090 -t $(_NAME) 
 
 
 build: 
