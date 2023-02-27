@@ -11,12 +11,17 @@ const wallet = require('./wallet.json')
 module.exports = {
 
 
+
 // cache: "redis",
   cache: "lmdb",
   redis: {
     url: `redis://${redishost}:${redisport}`,
   },
 
+  offchain_db: {
+    prefix: "aaa",
+    url: `redis://${redishost}:${redisport}`,
+  },
 
   // subscribe: false,
   subscribe: true,

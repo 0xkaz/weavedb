@@ -26,6 +26,11 @@ module.exports = {
   redis: {
     url: `redis://${redishost}:${redisport}`,
   },
+
+  offchain_db: {
+    prefix: "aaa",
+    url: `redis://${redishost}:${redisport}`,
+  },
   admin: {
     contractTxId: "WEAVEDB_ADMIN_CONTRACT",
     // YSReuO6vzkBWd4Tdfe8HE0YLXj4tJokfatsORv7iZ94
