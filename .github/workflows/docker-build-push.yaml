@@ -122,6 +122,9 @@ jobs:
       - name: delete old docker image 2 ( node-server-redis-9090 )
         run: ./scripts/delete_old_docker_images.rb node-server-redis-9090 
         working-directory: ./grpc-node/node-server
+      - name: delete old docker image 3 ( node-server-redis-wo-subscribe-9090 )
+        run: ./scripts/delete_old_docker_images.rb node-server-redis-wo-subscribe-9090 
+        working-directory: ./grpc-node/node-server
       
 
 
