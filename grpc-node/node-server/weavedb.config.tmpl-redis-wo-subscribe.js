@@ -10,22 +10,7 @@ const s3prefix = process.env.S3_PREFIX
 const wallet = require('./wallet.json')
 module.exports = {
 
-
-
-// cache: "redis",
-  cache: "lmdb",
-  redis: {
-    url: `redis://${redishost}:${redisport}`,
-  },
-
-  offchain_db: {
-    prefix: "aaa",
-    url: `redis://${redishost}:${redisport}`,
-  },
-
-  subscribe: true,
-  // subscribe: false,
-
+  // subscribe: true,
   s3: {
     bucket: s3bucket,
     prefix: s3prefix,
@@ -34,10 +19,18 @@ module.exports = {
     region: s3region,
   },
 
-  // cache: "redis",
-  // redis: {
-  //   url: `redis://${redishost}:${redisport}`,
-  // },
+  // subscribe: false,
+  subscribe: false,
+
+  cache: "redis",
+  redis: {
+    url: `redis://${redishost}:${redisport}`,
+  },
+
+  offchain_db: {
+    prefix: "aaa",
+    url: `redis://${redishost}:${redisport}`,
+  },
   admin: {
     contractTxId: "WEAVEDB_ADMIN_CONTRACT",
     // YSReuO6vzkBWd4Tdfe8HE0YLXj4tJokfatsORv7iZ94
