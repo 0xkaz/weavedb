@@ -12,8 +12,8 @@ module.exports = {
 
 
 
-// cache: "redis",
-  cache: "lmdb",
+  cache: "redis", // cache:redis by default tempoorary
+  // cache: "lmdb",
   cache_prefix: "tel-aviv", // this is for query cache
 
   redis: {    // this is for snapshot cache
@@ -27,7 +27,7 @@ module.exports = {
     url: `redis://${redishost}:${redisport}`,
   },
 
-  subscribe: true,
+  // subscribe: true,
   // subscribe: false,
 
   s3: {

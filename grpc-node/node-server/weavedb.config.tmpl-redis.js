@@ -20,7 +20,7 @@ module.exports = {
   },
 
   // subscribe: false,
-  subscribe: true,
+  // subscribe: true,
   cache_prefix: "tel-aviv", // this is for query cache
 
   cache: "redis",
