@@ -19,16 +19,20 @@ module.exports = {
     region: s3region,
   },
 
+  cache_prefix: "tel-aviv", // this is for query cache
   // subscribe: false,
   subscribe: false,
 
   cache: "redis",
   redis: {
+    // this is for snapshot cache
+    prefix: "weavedb",
     url: `redis://${redishost}:${redisport}`,
   },
 
   offchain_db: {
-    prefix: "aaa",
+    // this is for internal offchain db to handle snapshot data
+    prefix: "offchain",
     url: `redis://${redishost}:${redisport}`,
   },
   admin: {

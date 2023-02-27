@@ -21,14 +21,18 @@ module.exports = {
 
   // subscribe: false,
   subscribe: true,
+  cache_prefix: "tel-aviv", // this is for query cache
 
   cache: "redis",
   redis: {
+    // this is for snapshot cache
+    prefix: "weavedb",
     url: `redis://${redishost}:${redisport}`,
   },
 
   offchain_db: {
-    prefix: "aaa",
+    // this is for internal offchain db to handle snapshot data
+    prefix: "offchain",
     url: `redis://${redishost}:${redisport}`,
   },
   admin: {
