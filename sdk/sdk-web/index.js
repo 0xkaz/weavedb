@@ -167,8 +167,6 @@ class SDK extends Base {
     this.nocache_default = !isNil(nocache)
       ? nocache
       : typeof window !== "undefined"
-      ? true
-      : nocache
     this.progress = progress
     this.virtual_nonces = {}
     this.cache_prefix = cache_prefix
@@ -242,7 +240,10 @@ class SDK extends Base {
       })
     }
   }
-
+  async readState() {
+    this.state = (await this.db.readState()).cachedValue.state
+    states[this.contractTxId] = this.state
+  }
   async addFunds(wallet) {
     const walletAddress = await this.arweave.wallets.getAddress(wallet)
     await this.arweave.api.get(`/mint/${walletAddress}/1000000000000000`)
@@ -447,7 +448,10 @@ class SDK extends Base {
       transaction: { id: createId() },
       contracts: {
         viewContractState: async (contract, param, SmartWeave) => {
-          const key = invertObj(this.state.contracts)[contract]
+          const key = invertObj(
+            (cachedStates[this.contractTxId] || states[this.contractTxId])
+              .contracts
+          )[contract]
           const { handle } = require(`weavedb-contracts/${key}/contract`)
           try {
             return await handle({}, { input: param }, SmartWeave)
@@ -803,13 +807,12 @@ class SDK extends Base {
   async getCache(...query) {
     if (isNil(states[this.contractTxId])) return null
     return (
-      await get(
+      await handle(
         clone(states[this.contractTxId]),
         {
-          input: { query },
+          input: { function: "get", query },
         },
-        false,
-        { block: {} }
+        this.getSW()
       )
     ).result
   }
@@ -817,13 +820,12 @@ class SDK extends Base {
   async cgetCache(...query) {
     if (isNil(states[this.contractTxId])) return null
     return (
-      await get(
+      await handle(
         clone(states[this.contractTxId]),
         {
-          input: { query },
+          input: { function: "cget", query },
         },
-        true,
-        { block: {} }
+        this.getSW()
       )
     ).result
   }
@@ -936,13 +938,12 @@ class SDK extends Base {
       }
       if (!isNil(_query)) {
         let val = (
-          await get(
+          await handle(
             clone(state),
             {
-              input: { query: _query },
+              input: { function: "cget", query: _query },
             },
-            true,
-            { block: {} }
+            this.getSW()
           )
         ).result
         if (!isNil(val)) delete val.block

@@ -42,6 +42,7 @@ class Node {
     this.port = port
     this.sdks = {}
     this.lastChecked = {}
+    this.polling = {}
     this.initRedis()
     this.cache = new Cache(conf, this.redis)
     this.snapshot = new Snapshot(conf)
@@ -124,7 +125,6 @@ class Node {
       map(v => v.split("@")[0]),
       unless(is(Array), of)
     )(this.conf.contractTxId || [])
-
     let allowed =
       !isNil(this.sdks[txid]) ||
       this.conf.allowAnyContracts === true ||
@@ -136,7 +136,8 @@ class Node {
         const date = Date.now()
         if (
           isNil(this.lastChecked[txid]) ||
-          this.lastChecked[txid] < date - 1000 * 60 * 10
+          this.lastChecked[txid] < date - 1000 * 60 * 10 ||
+          !isNil(this.polling[txid])
         ) {
           this.lastChecked[txid] = date
           if (!isNil(await this.admin_sdk.get("contracts", txid))) {
@@ -173,7 +174,18 @@ class Node {
     }
     return { len, err, done, all, current }
   }
-
+  async readState(txid, attempt = 1) {
+    try {
+      await this.sdks[txid].readState()
+    } catch (e) {
+      console.log(`readState(${txid}) error! attempt #${attempt}`)
+      if (attempt < 5) {
+        await this.readState(txid, ++attempt)
+      } else {
+        throw new Error(e)
+      }
+    }
+  }
   async initSDK(v, no_snapshot = false) {
     console.log("initializing contract..." + v)
     this.progresses[v] = {
@@ -223,18 +235,19 @@ class Node {
             this.last_reported = Date.now()
             this.calcProgress()
           }
-          if (v.last_checked < Date.now() - 1000 * 10) {
+          if ((this.progresses[v].last_checked || 0) < Date.now() - 1000 * 10) {
+            this.progresses[v].last_checked = Date.now()
             await this.db.set(this.progresses[v], "contracts", v, {
               ar: this.conf.admin.owner,
             })
           }
         }
         __conf.logLevel = "none"
-        __conf.subscribe = false
+        __conf.subscribe = this.conf.admin?.contractTxId === v
       }
       this.sdks[txid] = new SDK(__conf)
       if (isNil(_conf.wallet)) await this.sdks[txid].initializeWithoutWallet()
-      await this.sdks[txid].db.readState()
+      await this.readState(txid)
       if (this.isLmdb && !no_snapshot) await this.snapshot.save(txid)
       if (this.isRedis && !no_snapshot) {
         await this.snapshot.save(txid, this.redis)
@@ -268,8 +281,9 @@ class Node {
         }
       }
     } catch (e) {
-      this.progresses[v].err = true
       console.log(`sdk(${v}) error!`)
+      console.log(e)
+      this.progresses[v].err = true
       success = false
       this.calcProgress()
       await this.db.set(this.progresses[v], "contracts", v, {
@@ -422,7 +436,6 @@ class Node {
       } catch (e) {}
 
       if (!isNil(data)) {
-        console.log("perhaps....................", data)
         res(null, data)
         return await this.sendQuery(parsed, key)
       }
