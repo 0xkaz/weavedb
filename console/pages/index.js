@@ -309,6 +309,7 @@ export default inject(
         setState(info)
         setDocuments([])
         setDocdata(null)
+        setDocPath([])
         set(null, "loading_contract")
         fn(switchTempAddress)({ contractTxId: _contractTxId })
         if (isNil(info.version)) {
@@ -360,6 +361,7 @@ export default inject(
           const db = await fn(setupWeaveDB)({
             contractTxId: node.contract,
             rpc: node.rpc,
+            temp: true,
           })
           const addr = /^0x.+$/.test($.temp_current_all.addr)
             ? $.temp_current_all.addr.toLowerCase()
