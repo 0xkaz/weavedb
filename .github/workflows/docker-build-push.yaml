@@ -49,20 +49,20 @@ jobs:
         working-directory: ./grpc-node/node-server
 
 
-      ## Redis without subscribe ( node-server-redis-wo-subscribe-9090 )
-      - name: weavedb config ( node-server-redis-wo-subscribe-9090 )
-        run: cat weavedb.config.tmpl-redis-wo-subscribe.js | sed s/WEAVEDB_ADMIN_CONTRACT/${{ secrets.WEAVEDB_ADMIN_CONTRACT }}/  > weavedb.config.js
-        working-directory: ./grpc-node/node-server
+      # ## Redis without subscribe ( node-server-redis-wo-subscribe-9090 )
+      # - name: weavedb config ( node-server-redis-wo-subscribe-9090 )
+      #   run: cat weavedb.config.tmpl-redis-wo-subscribe.js | sed s/WEAVEDB_ADMIN_CONTRACT/${{ secrets.WEAVEDB_ADMIN_CONTRACT }}/  > weavedb.config.js
+      #   working-directory: ./grpc-node/node-server
 
-      - name: docker build ( node-server-redis-wo-subscribe-9090 )
-        run: docker build  --platform linux/amd64  -t node-server-redis-wo-subscribe-9090 . 
-        working-directory: ./grpc-node/node-server
+      # - name: docker build ( node-server-redis-wo-subscribe-9090 )
+      #   run: docker build  --platform linux/amd64  -t node-server-redis-wo-subscribe-9090 . 
+      #   working-directory: ./grpc-node/node-server
 
-      - name: docker tag5
-        run: docker tag  node-server-redis-wo-subscribe-9090:latest ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ secrets.AWS_MAIN_REGION }}.amazonaws.com/node-server-redis-wo-subscribe-9090:latest
-      - name: docker tag6
-        run: docker tag  node-server-redis-wo-subscribe-9090:latest ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ secrets.AWS_MAIN_REGION }}.amazonaws.com/node-server-redis-wo-subscribe-9090:`date +%Y-%m-%d-%H-%I-%S`-$GITHUB_SHA-${GITHUB_REF##*/}
-        working-directory: ./grpc-node/node-server
+      # - name: docker tag5
+      #   run: docker tag  node-server-redis-wo-subscribe-9090:latest ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ secrets.AWS_MAIN_REGION }}.amazonaws.com/node-server-redis-wo-subscribe-9090:latest
+      # - name: docker tag6
+      #   run: docker tag  node-server-redis-wo-subscribe-9090:latest ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ secrets.AWS_MAIN_REGION }}.amazonaws.com/node-server-redis-wo-subscribe-9090:`date +%Y-%m-%d-%H-%I-%S`-$GITHUB_SHA-${GITHUB_REF##*/}
+      #   working-directory: ./grpc-node/node-server
 
       # docker login 
 
@@ -110,9 +110,9 @@ jobs:
       # push 2
       - name: docker push ( node-server-redis-9090 )
         run: docker push  --all-tags ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ secrets.AWS_MAIN_REGION }}.amazonaws.com/node-server-redis-9090
-      # push 3
-      - name: docker push ( node-server-redis-wo-subscribe-9090 )
-        run: docker push  --all-tags ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ secrets.AWS_MAIN_REGION }}.amazonaws.com/node-server-redis-wo-subscribe-9090
+      # # push 3
+      # - name: docker push ( node-server-redis-wo-subscribe-9090 )
+      #   run: docker push  --all-tags ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ secrets.AWS_MAIN_REGION }}.amazonaws.com/node-server-redis-wo-subscribe-9090
       
       - name: delete old docker image 1 ( node-server-9090 )
         run: ./scripts/delete_old_docker_images.rb node-server-9090
