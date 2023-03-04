@@ -40,15 +40,24 @@ class Log {
     this.signer = signer
   }
   async rec(array = false) {
-    const res = isNil(this.opt)
-      ? array
-        ? await this.sdk[this.method](...this.query)
-        : await this.sdk[this.method](this.query)
-      : array
-      ? await this.sdk[this.method](...this.query, this.opt)
-      : await this.sdk[this.method](this.query, this.opt)
+    let res = {},
+      err
+    try {
+      res = isNil(this.opt)
+        ? array
+          ? await this.sdk[this.method](...this.query)
+          : await this.sdk[this.method](this.query)
+        : array
+        ? await this.sdk[this.method](...this.query, this.opt)
+        : await this.sdk[this.method](this.query, this.opt)
+    } catch (e) {
+      err = e
+    }
     const date = Date.now()
+    err = err?.message || res?.error || res?.error?.code || null
     let log = {
+      err,
+      virtual_txid: res?.result?.transaction?.id || null,
       txid: !isNil(res) && !isNil(res.originalTxId) ? res.originalTxId : null,
       node: this.node,
       date,
@@ -63,6 +72,19 @@ class Log {
     if (res?.success && !isNil(res.nonce)) {
       this.fn(setNonce)({ nonce: res.nonce + 1, signer: this.signer })
     }
+    if (!isNil(res?.getResult)) {
+      res
+        .getResult()
+        .then(result => {
+          if (!isNil(result))
+            this.fn(updateLog)({
+              virtual_txid: log.virtual_txid,
+              txid: result.originalTxId,
+            })
+        })
+        .catch(e => {})
+    }
+    if (!isNil(err)) throw new Error(err?.message)
     return clone(res)
   }
 }
@@ -778,6 +800,14 @@ export const _whitelist = async ({
 export const addLog = async ({ set, get, val: { log } }) => {
   let logs = get("tx_logs") || []
   set(prepend(log, logs), "tx_logs")
+}
+
+export const updateLog = async ({ set, get, val: { virtual_txid, txid } }) => {
+  let logs = clone(get("tx_logs") || [])
+  for (let v of logs) {
+    if (v.virtual_txid === virtual_txid) v.txid = txid
+  }
+  set(logs, "tx_logs")
 }
 
 export const addRelayerJob = async ({
