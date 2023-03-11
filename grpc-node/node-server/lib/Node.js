@@ -383,7 +383,7 @@ class Node {
       `0.0.0.0:${this.port}`,
       grpc.ServerCredentials.createInsecure(),
       () => {
-        addReflection(server, '../static_codegen/descriptor_set.bin')
+        addReflection(server, './static_codegen/descriptor_set.bin')
         server.start()
       }
     )
