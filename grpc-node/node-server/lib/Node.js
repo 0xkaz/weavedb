@@ -23,7 +23,7 @@ const {
   isNil,
 } = require("ramda")
 const grpc = require("@grpc/grpc-js")
-const {addReflection} = require('grpc-server-reflection')
+// const {addReflection} = require('grpc-server-reflection')
 const protoLoader = require("@grpc/proto-loader")
 const PROTO_PATH = __dirname + "/../weavedb.proto"
 const packageDefinition = protoLoader.loadSync(PROTO_PATH, {
@@ -384,7 +384,7 @@ class Node {
       `0.0.0.0:${this.port}`,
       grpc.ServerCredentials.createInsecure(),
       () => {
-        addReflection(server, './static_codegen/descriptor_set.bin')
+        // addReflection(server, './static_codegen/descriptor_set.bin')
         server.start()
       }
     )
