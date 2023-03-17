@@ -1,3 +1,4 @@
+import { nanoid } from "nanoid"
 const { Ed25519KeyIdentity } = require("@dfinity/identity")
 const lens = {
   contract: "0xDb46d1Dc155634FbC732f92E853b10B288AD5a1d",
@@ -26,6 +27,7 @@ import {
   includes,
   uniq,
   dissoc,
+  isEmpty,
 } from "ramda"
 import { Buffer } from "buffer"
 import { weavedbSrcTxId, dfinitySrcTxId, ethereumSrcTxId } from "./const"
@@ -38,7 +40,7 @@ const ret = res =>
     : JSON.stringify(res)
 
 class Log {
-  constructor(sdk, method, query, opt, fn, signer) {
+  constructor(sdk, method, query, opt, fn, signer, id) {
     this.contractTxId = sdk.contractTxId
     this.node = isNil(sdk.client) ? null : sdk.client.hostname_
     this.start = Date.now()
@@ -48,6 +50,7 @@ class Log {
     this.opt = opt
     this.sdk = sdk
     this.signer = signer
+    this.id = id || nanoid()
   }
   async rec(array = false) {
     let res = {},
@@ -69,6 +72,7 @@ class Log {
     err = err?.message || _res?.error || _res?.error?.code || null
 
     let log = {
+      id: this.id,
       err,
       virtual_txid: _res?.result?.transaction?.id || null,
       txid:
@@ -101,7 +105,14 @@ class Log {
         })
         .catch(e => {})
     }
-    if (!isNil(err)) throw new Error(err?.message)
+    if (!isNil(err))
+      throw new Error(
+        typeof err === "string"
+          ? err
+          : typeof err?.message === "string"
+          ? err.message
+          : "unknown error"
+      )
     return clone(res)
   }
 }
@@ -120,7 +131,9 @@ export const getOpt = async ({ val: { contractTxId, read = [] }, get }) => {
     ? { ii, dryWrite: { cache: true, read } }
     : !isNil(identity) && !isNil(identity.tx)
     ? {
-        wallet: current,
+        wallet: /^lens:/.test(current)
+          ? current.split(":").slice(0, -1).join(":")
+          : current,
         privateKey: identity.privateKey,
         dryWrite: { cache: true, read },
       }
@@ -330,14 +343,19 @@ export const createTempAddressWithLens = async ({
   fn,
   val: { contractTxId, network, node },
 }) => {
-  let identity, tx, addr
-  ;({ tx, identity } = await new Log(
-    sdk,
-    "createTempAddressWithLens",
-    null,
-    null,
-    fn
-  ).rec())
+  let identity, tx, addr, err
+  try {
+    ;({ tx, identity } = await new Log(
+      sdk,
+      "createTempAddressWithLens",
+      null,
+      null,
+      fn
+    ).rec())
+    console.log(tx)
+  } catch (e) {
+    throw e
+  }
   const linked = await new Log(
     sdk,
     "getAddressLink",
@@ -346,7 +364,7 @@ export const createTempAddressWithLens = async ({
     fn
   ).rec()
   if (isNil(linked)) {
-    alert("something went wrong")
+    throw new Error("something went wrong")
     return
   } else {
     addr = linked.address
@@ -356,7 +374,9 @@ export const createTempAddressWithLens = async ({
     await provider.send("eth_requestAccounts", [])
     const signer = provider.getSigner()
     const contract = new ethers.Contract(lens.contract, lens.abi, signer)
-    const handle = await contract.getHandle(addr.split(":")[1])
+    const handle = await sdk.repeatQuery(contract.getHandle, [
+      addr.split(":")[1],
+    ])
     addr += `:${handle}`
     identity.tx = dissoc("getResult", tx)
     identity.linked_address = addr
@@ -994,6 +1014,35 @@ export const queryDB = async ({
       opt.dryWrite = { cache: true, read: dryRead }
     }
     return ret(await new Log(sdk, method, q, opt, fn, signer).rec(true))
+  } catch (e) {
+    console.log(e)
+    return `Error: Something went wrong`
+  }
+}
+
+export const queryDB2 = async ({
+  val: { query, method, contractTxId, dryRead, id },
+  fn,
+}) => {
+  try {
+    let { err, opt, signer } = includes(method)(sdk.reads)
+      ? { err: null, opt: {} }
+      : await fn(getOpt)({ contractTxId })
+    if (!isNil(err)) return alert(err)
+    if (!includes(method)(sdk.reads) && !isNil(dryRead)) {
+      opt.dryWrite = { cache: true, read: dryRead }
+    }
+    return ret(
+      await new Log(
+        sdk,
+        method,
+        query,
+        includes(method)(sdk.reads) && isEmpty(opt) ? null : opt,
+        fn,
+        signer,
+        id
+      ).rec(true)
+    )
   } catch (e) {
     console.log(e)
     return `Error: Something went wrong`
