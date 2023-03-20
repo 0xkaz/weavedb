@@ -185,7 +185,8 @@ class Base {
       extra,
       relay,
       jobID,
-      multisigs
+      multisigs,
+      address
     if (!isNil(opt)) {
       ;({
         jobID,
@@ -201,8 +202,10 @@ class Base {
         intmax,
         extra,
         multisigs,
+        address,
       } = opt)
     }
+    if (isNil(address)) wallet = address
     if (all(isNil)([wallet, ii, intmax, ar]) && !isNil(this.arweave_wallet)) {
       ar = this.arweave_wallet
     }
@@ -430,6 +433,10 @@ class Base {
       }
     } else if (is(String, evm)) {
       addr = evm
+    }
+    if (isNil(addr) && !isNil(this.web3)) {
+      const accounts = await ethereum.request({ method: "eth_accounts" })
+      addr = accounts[0]
     }
     opt.wallet = wallet
     return this._createTempAddress(addr.toLowerCase(), expiry, linkTo, opt)
