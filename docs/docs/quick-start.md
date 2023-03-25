@@ -69,7 +69,7 @@ Clik `Connect Owner Wallet` and connect your wallet. This will be the admin acco
 
 Set `Secure` to `False` for this tutorial (never do that for production dapps).
 
-Finally, `Deploy DB Instance`. Your DB will be deployed to mainnet in a few seconds. You can view the transaction for the deployment via the `contractTxId` link.
+Finally, `Deploy DB Instance`. Your DB will be deployed to the mainnet in a few seconds. You can view the transaction for the deployment via the `contractTxId` link.
 
 ![](https://i.imgur.com/vL4d75W.png)
 
@@ -205,7 +205,7 @@ Let's add some people for the following tutorial.
 
 ```bash
 set {name:"Bob",age:20} people Bob
-set {name: "Alice", age:30} people Alice
+set {name: "Alice",age:30} people Alice
 set {name:"Mike",age:40} people Mike
 ```
 
@@ -253,7 +253,7 @@ get people ["age","desc"]
 Single field indexes are automatically generated. But to sort by more than 1 field, multi-field indexes need to be added explicitly. Read onto the following section.
 :::
 
-### Add Indexes
+### Add Multi-Field Indexes
 To set an index to sort people first by age in descending order, then by name in ascending order.
 
 ```bash
@@ -264,7 +264,7 @@ get people ["age","desc"] ["name"]
 
 ### Special Operations
 
-WeaveDB has shortcuts for common operations which only works with the SDK and not with the terminal for now.
+WeaveDB has shortcuts for common operations which only work with the SDK and not with the terminal for now.
 
 ##### inc
 
@@ -413,6 +413,8 @@ With [FPJSON](https://fpjson.weavedb.dev/), you can do powerful things such as m
 
 ## Intermediate
 
+### Connecting from Frontend
+
 Now, let's connect with the DB instance from a front-end dapp. You need to use `weavedb-sdk` for that.
 
 To install,
@@ -431,7 +433,7 @@ await db.initializeWithoutWallet()
 const people = await db.get("people")
 ```
 
-### Execute Queries
+#### Execute Queries
 
 To add a doc with the browser connected Metamask,
 
@@ -460,7 +462,7 @@ By generating a disposal address, dapp users won't be asked for a signature with
 :::
 
 
-### Example with NextJS
+#### Example with NextJS
 
 Let's build the simplest dapp to connect with WeaveDB from the client-side with [NextJS](https://nextjs.org/). Make sure you have `yarn` and `create-next-app` installed.
 
@@ -490,7 +492,7 @@ export default function Home() {
       })
       await db.initializeWithoutWallet()
     })()
-  })
+  },[])
 
   return user === null ? ( // show Login button if user doesn't exist
     <div
@@ -545,25 +547,389 @@ The WeaveDB dryWrite with a virtual state is faster than the WarpSDK dryWrite wh
 The SDK needs to be initialized with an Arweave wallet to send transactions to Arweave, but for now you don't have to pay for any transactions. So you can initialize it with a randomly generated wallet with `initializeWithoutWallet`.
 :::
 
+### Authentication
+
+User authentication on WeaveDB is purely done by cryptography without any centralized components.
+
+There are 5 wallet integrations at the moment, which includes
+
+- [Metamask](https://metamask.io/) ([EVM](https://ethereum.org/en/developers/docs/evm/)) - `secp256k1`
+- [Internet Identity](https://identity.ic0.app/) ([Dfinity](https://dfinity.org/)) - `ed25519`
+- [ArConnect](https://www.arconnect.io/) ([Arweave](https://arweave.org/)) - `rsa256`
+- [IntmaxWallet](https://www.intmaxwallet.io/) ([Intmax zkRollup](https://intmax.io/)) - `secp256k1-2` | `poseidon`
+- [Lens Profile](https://polygonscan.com/token/0xdb46d1dc155634fbc732f92e853b10b288ad5a1d) ([Lens Protocol](https://lens.xyz)) - `secp256k1-2`
+
+![](/img/wallets.png)
+
+We will use only EVM, Arweave and Lens for this tutorial.
+
+#### Set Auth Algorithms
+
+You can enable/disable authentication by setting required algorithms listed above.
+
+`secp256k1` is for [EIP712](https://eips.ethereum.org/EIPS/eip-712) typed structured data signatures and `secp256k1-2` is for regular [EIP191](https://eips.ethereum.org/EIPS/eip-191) signatures used in Lit Action.
+
+For example, to enable only EVM, Arweave and Lens.
+```bash
+setAlgorithms ["secp256k1","rsa256","secp256k1-2"]
+```
+
+#### Lens Protocol Profiles
+
+Lens Profiles are Polygon NFTs, which requires a different way to securely verify them across chains. WeaveDB utilizes [Lit Protocol](https://litprotocol.com/) to validate ownerships of Lens Profiles in a decentralized and verifiable fashion.
+
+![](/img/lens-auth.png)
+
+The [Lit Action](https://developer.litprotocol.com/coreConcepts/LitActionsAndPKPs/actions/litActions) is [an immutable script stored in IPFS](https://cloudflare-ipfs.com/ipfs/QmYq1RhS5A1LaEFZqN5rCBGnggYC9orEgHc9qEwnPfJci8), which validates ownerships of Lens Profiles and signs WeaveDB queries with a PKP ([Programmable Key Pair](https://developer.litprotocol.com/coreConcepts/LitActionsAndPKPs/PKPs)). The privateKeys of PKPs are decentralized by [threshold cryptography](https://academy.binance.com/en/articles/threshold-signatures-explained) and controled by NFT to grant access to Lit Action scripts, but we use the [Mint/Grant/Burn](https://developer.litprotocol.com/coreconcepts/litactionsandpkps/intro/#what-is-mintgrantburn) technique to immediately abandon the ownership after granting access to only one IPFS address, so the PKP(0xF810D4a6F0118E6a6a86A9FBa0dd9EA669e1CC2E) associated with the IPFS script can only produce signatures within that script.
+
+So any queries signed by the PKP are guaranteed to be validated through the immutable IPFS script of Lit Action, which securely bridges data from Polygon to WeaveDB (Arweave). WeaveDB verifies the PKP signature and links the verified Lens Profile to a disposal EVM address, so the user doesn't have to repeat this authentication process again.
+
+To enable the Lens authentication, you need to set up a relayer job (`auth:lens`) so the Lit Action can function as [a WeaveDB relayer](/docs/sdk/relayers). But the whole setup is taken care of by [Web Console](https://console.weavedb.dev), if you leave the Lens check marked when deploying your contract.
+
+![](/img/lens-check.png)
+
+
+#### Generating Disposal Key Pair
+
+For optimal UX for dapp users, you would want to generate a disposal key pair and let it auto-sign transactions without wallet pop-ups evey time they are to update data.
+
+We will explore the disposal key flow, but for any other usages, refer to [the Authentication document](/docs/sdk/auth).
+
+```javascript
+// with Metamask
+const { tx, identity } = await db.generateTempAddress()
+
+// with ArConnect
+const { tx, identity } = await db.generateTempAddressWithAR()
+
+// with Lens Profile
+const { tx, identity } = await db.generateTempAddressWithLens()
+```
+
+You can also set an expiry date to disposal keys.
+
+```javascript
+const expiry = 60 * 60 * 24 * 3 // 3 days
+
+// with Metamask, the first argument is to manually set the wallet
+const { tx, identity } = await db.generateTempAddress(null, expiry)
+
+// with ArConnect
+const { tx, identity } = await db.generateTempAddressWithAR(null, expiry)
+
+// with Lens Profile
+const { tx, identity } = await db.generateTempAddressWithLens(null, expiry)
+```
+
+The `identity` object.
+
+```javascript
+const identity = {
+  privateKey, // the disposal account privKey
+  publicKey, // the disposal account pubKey
+  address, // the disposale account address
+  linkedAccount, // the original account address, `lens:123` for lens
+  signer, // the generator of the identity, same as linkedAddress except for lens
+  type, // evm | ar | ii | intmax | lens
+  profile // only for Lens, e.g.) `identity.profile.handle` to get handle
+}
+```
+To execute queries, set the `identity` as the last argument to any write query.
+
+```javascript
+await db.set(data, "people", "Bob", identity)
+await db.delete(data, "people", "Bob", identity)
+```
+
+
+#### Using Signer in Access Control Rules
+
+As explained [earlier](/docs/quick-start#set-up-access-control-rules), you can access the signer (`request.auth.signer`) in access control rules.
+
+The signer will be the original address(`identity.linkedAccount`) and not the disposal EVM address(`identity.address`).
+
+And for Lens Profile, the format is `lens:[tokenID]`. So if your tokenID is `123`, you will get `lens:123` as the signer.
+
+Once again, to restrict the data update to only the original owner.
+
+```javascript
+{
+  "allow create": { // signer must be set to `user` field
+    "==": [{ var: "request.auth.signer" }, { var: "resource.newData.user" }]
+  },
+  "allow update": { // signer must be the same as `user`
+    "==": [{ var: "request.auth.signer" }, { var: "resource.data.user" }]
+  }
+}
+```
+
+By using `let` you can [mutate or add extra data](/docs/sdk/rules#add-on-json-based-functional-programming) to the updated data.
+
+For example, the following assigns the `signer` to `user` field of the updated data on `create`.
+
+```javascript
+{
+  "let create": { // assign signer to `user`
+    "resource.newData.user" : { var: "request.auth.signer" }
+  }
+}
+```
+
+#### Example with NextJS
+
+Set the following access control rules to `users` collection using [the Web Console](https://console.weavedb.dev).
+
+```javascript
+{
+  "let create": {
+    "resource.newData.user" : { var: "request.auth.signer" }
+  },
+  "allow create": true
+}
+```
+
+Frontend code.
+
+```jsx
+import { useState, useEffect } from "react"
+import SDK from "weavedb-sdk"
+import lf from "localforage" // to store user in indexedDB for persistence
+
+let db
+export default function Home() {
+  const [user, setUser] = useState(null)
+  const [users, setUsers] = useState([])
+
+  useEffect(() => {
+    ;(async () => {
+	  // check if an authenticated user exists
+      setUser((await lf.getItem("identity")) || null)
+
+      // initialize SDK
+      const _db = await new SDK({ contractTxId: "your_contractTxId" })
+      await _db.initializeWithoutWallet()
+	  
+	  // fetch all users
+      setUsers(await _db.get("users"))
+	  
+      db = _db
+    })()
+  }, [])
+
+  // on creating a disposal key pair
+  const regUser = async ({ tx, identity }) => {
+    if (!tx.success) return
+	
+	// set user
+    setUser(identity)
+	
+	// store user for persistence between page reload
+    await lf.setItem("identity", identity)
+	
+	// also save user to WeaveDB, the access control rules fill user address
+    await db.set(
+      { type: identity.type },
+      "users",
+      identity.linkedAccount,
+      identity
+    )
+  }
+
+  return (
+    <>
+      {user === null ? (
+        <>
+          <div onClick={async () => regUser(await db.createTempAddress())}>
+            Login with Metamask
+          </div>
+          <div
+            onClick={async () => regUser(await db.createTempAddressWithAR())}
+          >
+            Login with Arweave
+          </div>
+          <div
+            onClick={async () => regUser(await db.createTempAddressWithLens())}
+          >
+            Login with Lens Profile
+          </div>
+        </>
+      ) : (
+        <div
+          onClick={async () => {
+		    // unset user
+            setUser(null)
+			
+			// remove locally stored user
+            await lf.removeItem("identity")
+          }}
+        >
+          Logout ({user.linkedAccount})
+        </div>
+      )}
+      <hr />
+      {users.map(v => { // render all users
+        return (
+          <div>
+            {v.type}: {v.user}
+          </div>
+        )
+      })}
+    </>
+  )
+}
+```
+
 ## Advanced
 
+### Building Lens Dapp
 Let's build an actual dapp, utilizing what you learned in this tutorial so far.
 
-We are going to build a simple todo dapp.
+We are going to build a simple Twitter-like dapp using Lens Profile.
 
-![](https://i.imgur.com/7Rj7oQD.png)
+You can try the working demo at [relayer-lens-lit.vercel.app](https://relayer-lens-lit.vercel.app/).
 
-Coming Soon...
+![](/img/lensweave.png)
+
+#### 1. Deploy DB Instance
+
+The first step is [to deploy a WeaveDB contract](/docs/quick-start#deploy-contract) to the mainnet. Set `Secure` to `false` so no one can update by default. Take note of the `contractTxId`.
+
+#### 2. Set up Schemas
+
+For this dapp, we will define 2 collections - `users` and `posts`. For example, the following is how we want the data to be.
+
+```javascript
+const user = { 
+  name: "Tomoya | WeaveDB", 
+  uid: "lens:97912", 
+  handle: "tomoya.lens",
+  image: "https://cloudflare-ipfs.com/ipfs/QmU51aQqJb6rwsjTYbUodMWRLJUVimdrHKcWwZARXVajzP"
+}
+
+const post = {
+  id: "YeIXjVbsUqHL4SYl0tW-I",
+  body: "WeaveLens is fully decentralized!",
+  user: "lens:97912",
+  date: 1678587066647
+}
+```
+
+The JSON schema for each collection would be something like the following.
+
+```javascript
+// for users, note `image` is not required
+{
+  "type": "object",
+  "required": [ "name", "uid", "handle" ],
+  "properties": {
+    "name": { "type": "string" },
+    "uid": { "type": "string" },
+    "handle": { "type": "string" },
+    "image": { "type": "string" }
+  }
+}
+
+// for posts
+{
+  "type": "object",
+  "required": [ "user", "body", "date", "id" ],
+  "properties": {
+    "id": { "type": "string" },
+    "body": { "type": "string" },
+    "user": { "type": "string" },
+    "date": { "type": "number" }
+  }
+}
+```
+
+Set these up using [the Web Console](/docs/quick-start#set-up-schema).
+
+#### 3. Set up Access Control Rules
+
+For users, we want the docid to be the same as `uid` and users can only update theire own data.
+
+```javascript
+{
+  "allow create": {
+    "and": [
+      // docid must be the same as uid
+      { "==": [{ "var": "request.id" }, { "var": "resource.newData.uid" }] },
+	  
+	  // uid must be the same as signer
+      { "==": [{ "var": "resource.newData.uid" }, { "var": "request.auth.signer" }] }
+    ]
+  },
+  "allow update": {
+    "and": [
+      // docid must be the same as uid	
+      { "==": [{ "var": "request.id" }, { "var": "resource.newData.uid" }] },
+	  
+	  // uid must be the same as signer	  
+      { "==": [{ "var": "resource.data.uid" }, { "var": "request.auth.signer" }] },
+	  
+	  // uid cannot be updated
+	  { "==": [{ "var": "resource.data.uid" }, { "var": "resource.newData.uid" }] },
+	  
+	  // handle cannot be updated
+	  { "==": [{ "var": "resource.data.handle" }, { "var": "resource.newData.handle" }] }
+    ]
+  }
+}
+```
+
+For posts, we want the docid to be in the format of `[user]:[id]`, and users can only delete their own posts.
+
+```javascript
+{
+  "let create": { // define `id` variable to use later
+    id: [ "join", ":", [{ var: "resource.newData.user" }, { var: "resource.newData.id" }] ]
+  },
+  "allow create": {
+    and: [
+	  // the signer must be `user`
+      { "==": [{ var: "resource.newData.user" }, { var: "request.auth.signer" }] },
+	  
+	  // the docid must be the same as the predefined `id`
+      { "==": [{ var: "request.id" }, { var: "id" }] }
+    ]
+  },
+  "allow delete": { // the signer must be `user`
+    "==": [{ var: "request.auth.signer" }, { var: "resource.data.user" }]
+  }
+}
+```
+Set these up using [the Web Console](/docs/quick-start#set-up-access-control-rules).
+
+#### 4. Frontend Dapp
+
+You can view the entire frontend code [here](https://github.com/weavedb/weavedb/tree/master/examples/relayer-lens-lit).
+
+To run it,
+
+```bash
+git clone https://github.com/weavedb/weavedb.git
+cd weavedb/examples/relayer-lens-lit
+yarn
+```
+Create `.env.local` and set your `contractTxId` to `NEXT_PUBLIC_WEAVEDB_CONTRACT_TX_ID`.
+
+```bash
+NEXT_PUBLIC_WEAVEDB_CONTRACT_TX_ID="your_contractTxId"
+```
+
+Then, 
+
+```bash
+yarn dev
+```
 
 ## Going Further
 
 WeaveDB is extremely powerful if you get familiar with advanced usages.
 
-- FPJSON to build advanced logic
-- Cron Jobs to periodically update data
-- Contract management / Upgradability
-- Authentication with other wallets
-- Verifiable relayers to process external data
-- Cross-chain data bridge with Lit Protocol
-- Using gRPC node for performance boost
-- Building scalable [Lens Protocol](https://www.lens.xyz/) dapps
+- [FPJSON](https://fpjson.weavedb.dev) to build advanced logic
+- [Cron Jobs](/docs/sdk/crons#json-based-functional-programming) to periodically update data
+- Contract management / [Upgradability](/docs/sdk/evolve)
+- Verifiable [relayers](/docs/sdk/relayers) to process external data
+- Cross-chain data bridge with [Lit Protocol](/docs/sdk/relayers#verifiable-oracles-with-lit-protocol)
+- Using [gRPC node](/docs/development/node) for performance boost
