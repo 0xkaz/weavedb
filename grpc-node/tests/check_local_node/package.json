@@ -1,0 +1,21 @@
+{
+  "name": "check_nodes",
+  "version": "1.0.0",
+  "main": "src/index.js",
+  "license": "MIT",
+  "engines": {
+    "node": "18.15"
+  },
+  "scripts": {
+    "start": "node src/index.js",
+    "dev": "node-dev --respawn src/index.js",
+    "prettier": "prettier ./src/*.js --write"
+  },
+  "dependencies": {
+    "node-dev": "^8.0.0",
+    "prettier": "^2.8.7",
+    "weavedb-node-client": "^0.25.0",
+    "weavedb-offchain": "^0.25.1",
+    "weavedb-sdk-node": "^0.26.4"
+  }
+}
