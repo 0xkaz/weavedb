@@ -20,6 +20,7 @@ module.exports = {
     prefix: "weavedb",
     url: `redis://${redishost}:${redisport}`,
   },
+  snapshot_span: 1000 * 60 * 60 * 3, // every 3 hours
 
   offchain_db: {
     // this is for internal offchain db to handle snapshot data

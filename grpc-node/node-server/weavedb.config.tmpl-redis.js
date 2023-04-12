@@ -18,6 +18,7 @@ module.exports = {
     secretAccessKey: secretAccessKey,
     region: s3region,
   },
+  snapshot_span: 1000 * 60 * 60 * 3, // every 3 hours
 
   // subscribe: false,
   // subscribe: true,
