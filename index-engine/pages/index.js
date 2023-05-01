@@ -36,6 +36,7 @@ let init = false
 const build = store => {
   let _s = JSON.parse(store)
   let arrs = []
+  let nodemap = {}
   const add = (node, depth = 0) => {
     arrs[depth] ??= []
     node.arr = []
@@ -47,10 +48,11 @@ const build = store => {
     }
     if (!isNil(node.children?.[i])) node.arr.push({ child: node.children[i] })
     arrs[depth].push(node)
+    nodemap[node.id] = node
     for (const v of node.children || []) add(_s[v], depth + 1)
   }
   if (!isNil(_s["root"])) add(_s[_s["root"]])
-  return arrs
+  return { arrs, nodemap }
 }
 
 let ids = {}
@@ -58,10 +60,57 @@ let stop = false
 const isErr = (store, order = 4) => {
   let err = false
   let where = null
-  let arrs = build(typeof store === "object" ? JSON.stringify(store) : store)
+  let { nodemap, arrs } = build(
+    typeof store === "object" ? JSON.stringify(store) : store
+  )
+  let i = 0
   for (const v of arrs) {
     let num = null
+    let i2 = 0
     for (const v2 of v) {
+      // check connections
+      // top
+      if (i !== 0) {
+        if (isNil(v2.parent) || !includes(v2.id, nodemap[v2.parent].children)) {
+          err = true
+          where = { arr: pluck("val", v2.arr), id: v2.id, type: "link-top" }
+          break
+        }
+      } else {
+        if (!isNil(v2.parent)) {
+          err = true
+          where = { arr: pluck("val", v2.arr), id: v2.id, type: "link-top" }
+          break
+        }
+      }
+      // left
+      if (i2 > 0) {
+        if (isNil(v2.prev) || nodemap[v2.prev].next !== v2.id) {
+          err = true
+          where = { arr: pluck("val", v2.arr), id: v2.id, type: "link-left" }
+          break
+        }
+      } else {
+        if (!isNil(v2.prev)) {
+          err = true
+          where = { arr: pluck("val", v2.arr), id: v2.id, type: "link-left" }
+          break
+        }
+      }
+      // right
+      if (i2 < v.length - 1) {
+        if (isNil(v2.next) || nodemap[v2.next].prev !== v2.id) {
+          err = true
+          where = { arr: pluck("val", v2.arr), id: v2.id, type: "right-left" }
+          break
+        }
+      } else {
+        if (!isNil(v2.next)) {
+          err = true
+          where = { arr: pluck("val", v2.arr), id: v2.id, type: "right-left" }
+          break
+        }
+      }
       for (const v3 of v2.arr) {
         if (isNil(v3.child)) {
           if (num === null || num <= v3.val) {
@@ -73,8 +122,10 @@ const isErr = (store, order = 4) => {
           }
         }
       }
+      i2++
       if (err) break
     }
+    i++
   }
   const min_vals = Math.ceil(order / 2) - 1
   if (!err) {
@@ -131,32 +182,72 @@ const isErr = (store, order = 4) => {
   return [err, where]
 }
 
-const initial_order = 4
+const alpha = "abcdefghijklmnopqrstuvwxyz".toUpperCase()
+const gen = type => {
+  if (type === "boolean") {
+    return Math.random() > 0.5 ? true : false
+  } else if (type === "string") {
+    return map(() => alpha[Math.floor(Math.random() * alpha.length)])(
+      range(0, 3)
+    ).join("")
+  } else {
+    return Math.floor(Math.random() * 100)
+  }
+}
+
+const initial_order = 5
 let _his = []
 for (const i of range(0, initial_order * 5)) {
-  _his.push(Math.floor(Math.random() * 100))
+  _his.push(gen("number"))
 }
 let _his2 = []
+for (const i of range(0, initial_order * 5)) {
+  _his2.push(gen("string"))
+}
+
+let _his3 = []
+for (const i of range(0, initial_order * 5)) {
+  _his3.push(gen("boolean"))
+}
+
 let count = 0
 export default function Home() {
   const [auto, setAuto] = useState(false)
   const [store, setStore] = useState("{}")
   const [order, setOrder] = useState(initial_order)
   const [currentOrder, setCurrentOrder] = useState(initial_order)
+  const [currentType, setCurrentType] = useState("number")
   const [data_type, setDataType] = useState("number")
   const [number, setNumber] = useState("")
   const [his, setHis] = useState([])
   const [display, setDisplay] = useState("Box")
   const [initValues, setInitValues] = useState(clone(_his).join(","))
+  const [initValuesStr, setInitValuesStr] = useState(clone(_his2).join(","))
+  const [initValuesBool, setInitValuesBool] = useState(clone(_his3).join(","))
   const reset = async () => {
     if (order < 3) return alert("order must be >= 3")
     setCurrentOrder(order)
+    setCurrentType(data_type)
     count = 0
     tree = new BPT(order, data_type, setStore)
-    const arr = map(v => v * 1)(initValues.split(","))
+    const arr =
+      data_type === "number"
+        ? map(v => v * 1)(initValues.split(","))
+        : data_type === "string"
+        ? initValuesStr.split(",")
+        : initValuesBool.split(",")
     ;(async () => {
       for (const n of arr) {
-        n < 0 ? await del(`id:${n * -1}`) : await insert(n)
+        ;(currentType === "number" && n < 0) ||
+        (currentType !== "number" && /^-/.test(n))
+          ? await del(`id:${n * -1}`)
+          : await insert(
+              data_type === "boolean"
+                ? typeof n === "string"
+                  ? n === "true"
+                  : n
+                : n
+            )
       }
     })()
     setStore("{}")
@@ -179,7 +270,6 @@ export default function Home() {
     await tree.delete(key)
     delete ids[key]
   }
-
   const go = async () => {
     if (stop) return
     setTimeout(async () => {
@@ -191,7 +281,7 @@ export default function Home() {
         ) {
           await del()
         } else {
-          await insert(Math.floor(Math.random() * 100))
+          await insert(gen(currentType))
         }
         const [err] = isErr(tree.kv.store, order)
         !err ? go() : setAuto(true)
@@ -207,7 +297,7 @@ export default function Home() {
       reset()
     }
   }, [])
-  let arrs = build(store)
+  let { nodemap, arrs } = build(store)
   const addNumber = async () => {
     if (number !== "") {
       await insert(number)
@@ -248,7 +338,11 @@ export default function Home() {
                 height="28px"
                 sx={{ borderRadius: "3px" }}
               >
-                {map(v => <option value={v}>{v}</option>)(["number"])}
+                {map(v => <option value={v}>{v}</option>)([
+                  "number",
+                  "string",
+                  "boolean",
+                ])}
               </Select>
             </Flex>
           </Box>
@@ -279,18 +373,46 @@ export default function Home() {
           Initial Values (comma separeted)
         </Flex>
         <Flex mx={2} mb={2}>
-          <Input
-            onChange={e => setInitValues(e.target.value)}
-            placeholder="Order"
-            value={initValues}
-            height="auto"
-            flex={1}
-            bg="white"
-            fontSize="12px"
-            py={1}
-            px={3}
-            sx={{ borderRadius: "3px 0 0 3px" }}
-          />
+          {data_type === "boolean" ? (
+            <Input
+              onChange={e => setInitValuesBool(e.target.value)}
+              placeholder="Order"
+              value={initValuesBool}
+              height="auto"
+              flex={1}
+              bg="white"
+              fontSize="12px"
+              py={1}
+              px={3}
+              sx={{ borderRadius: "3px 0 0 3px" }}
+            />
+          ) : data_type === "string" ? (
+            <Input
+              onChange={e => setInitValuesStr(e.target.value)}
+              placeholder="Order"
+              value={initValuesStr}
+              height="auto"
+              flex={1}
+              bg="white"
+              fontSize="12px"
+              py={1}
+              px={3}
+              sx={{ borderRadius: "3px 0 0 3px" }}
+            />
+          ) : (
+            <Input
+              onChange={e => setInitValues(e.target.value)}
+              placeholder="Order"
+              value={initValues}
+              height="auto"
+              flex={1}
+              bg="white"
+              fontSize="12px"
+              py={1}
+              px={3}
+              sx={{ borderRadius: "3px 0 0 3px" }}
+            />
+          )}
         </Flex>
         <Flex
           align="center"
@@ -364,7 +486,7 @@ export default function Home() {
           color="white"
           onClick={async () => {
             if (err) return
-            const num = Math.ceil(Math.random() * 100)
+            const num = gen(currentType)
             await insert(num)
           }}
           sx={{
@@ -481,6 +603,10 @@ export default function Home() {
                                 "string",
                               ])
                                 ? v3.val ?? v3.child
+                                : typeof (v3.val ?? v3.child) === "boolean"
+                                ? v3.val
+                                  ? "true"
+                                  : "false"
                                 : "-"}
                             </Flex>
                           )
@@ -557,12 +683,17 @@ export default function Home() {
                     minW="16px"
                     minH="16px"
                     m={1}
+                    p={1}
                     as="span"
                     color="white"
                     bg={v.op === "del" ? "salmon" : "#6441AF"}
                     sx={{ borderRadius: "3px", wordBreak: "break-allx" }}
                   >
-                    {v.val}
+                    {typeof v.val === "boolean"
+                      ? v.val
+                        ? "true"
+                        : "false"
+                      : v.val}
                   </Flex>
                 ))(his)}
           </Flex>
