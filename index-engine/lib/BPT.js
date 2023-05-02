@@ -1,4 +1,4 @@
-import {
+const {
   init,
   concat,
   without,
@@ -17,15 +17,15 @@ import {
   prop,
   isNil,
   map,
-} from "ramda"
+} = require("ramda")
 
 const KV = require("./KV")
 
 class BPT {
-  constructor(order = 4, data_type = "number", setStore) {
+  constructor(order = 4, sort_fields = "number", setStore) {
     this.kv = new KV(setStore)
     this.order = order
-    this.data_type = data_type
+    this.sort_fields = sort_fields
     this.max_vals = this.order - 1
     this.min_vals = Math.ceil(this.order / 2) - 1
   }
@@ -39,7 +39,18 @@ class BPT {
   setRoot = async id => (await this.put("root", id)) ?? null
   isOver = (node, plus = 0) => node.vals.length + plus > this.max_vals
   isUnder = (node, plus = 0) => node.vals.length + plus < this.min_vals
-
+  comp(a, b) {
+    if (typeof this.sort_fields === "string") {
+      return a === b ? 0 : a < b ? 1 : -1
+    } else {
+      for (const v of this.sort_fields) {
+        if (a[v[0]] !== b[v[0]]) {
+          return (a[v[0]] < b[v[0]] ? 1 : -1) * (v[1] === "desc" ? -1 : 1)
+        }
+      }
+      return 0
+    }
+  }
   async id() {
     const count = ((await this.get("count")) ?? -1) + 1
     await this.put("count", count)
@@ -65,7 +76,7 @@ class BPT {
     if (node.leaf) return node
     let i = 0
     for (const v of node.vals) {
-      if (val <= v) {
+      if (this.comp(val, v) === 1) {
         return await this.search(val, node.children[i])
       }
       i++
@@ -77,21 +88,54 @@ class BPT {
     const val = await this.data(key)
     let node = await this.search(val)
     if (isNil(node)) return [val, null, null]
-    return [val, ...(await this.searchNode(node, key, val))]
+    return [val, ...(await this.searchNode(node, key, val, true))]
   }
 
-  async searchNode(node, key, val) {
-    // this should be binary search
-    let index = 0
-    for (const v of node.vals) {
-      const _val = await this.data(v)
-      if (val < _val) return [null, null]
-      if (v === key) return [index, node]
-      index += 1
+  async searchNode(node, key, val, first = false) {
+    let start = 0
+    if (first) {
+      start = null
+      let left = 0
+      let right = node.vals.length - 1
+      while (left <= right) {
+        let mid = Math.floor((left + right) / 2)
+        let midval = await this.data(node.vals[mid])
+        if (midval === val) {
+          start = mid
+          break
+        } else if (this.comp(midval, val) === 1) {
+          left = mid + 1
+        } else {
+          right = mid - 1
+        }
+      }
     }
-    return isNil(node.next)
-      ? [null, null]
-      : await this.searchNode(await this.get(node.next), key, val)
+    let isPrev = start === 0
+    // get nodes containing the val
+    if (start === null) return [null, null]
+    if (start > 0) {
+      //search backword first
+      for (let i = start - 1; i >= 0; i--) {
+        const v = node.vals[i]
+        if (v === key) return [i, node]
+        const _val = await this.data(v)
+        if (val > _val) break
+        if (i === 0) isPrev = true
+      }
+    }
+    for (let i = 0; i < node.vals.length; i++) {
+      const v = node.vals[i]
+      if (v === key) return [i, node]
+      const _val = await this.data(v)
+      if (this.comp(val, _val) === 1) {
+        if (isPrev) break
+        return [null, null]
+      }
+    }
+    // search ends up the right most node, so there is no next
+    return isPrev && !isNil(node.prev)
+      ? await this.searchNode(await this.get(node.prev), key, val)
+      : [null, null]
   }
 
   // can be merged with recursive balance?
@@ -180,10 +224,6 @@ class BPT {
             await this.putNode(next)
             isMerged = true
           }
-        }
-        // this might never happen
-        if (!isMerged) {
-          console.log("this is rare....")
         }
       } else if (node.vals.length === 0) {
         let root = null
@@ -299,12 +339,6 @@ class BPT {
             isMerged = true
           }
         }
-
-        // this might never happen
-        if (!isMerged) {
-          console.log("now this is a huge problem and rare")
-        }
-
         await this.putNode(parent)
       } else if (node.vals.length === 0) {
         // removing root, root can have any number of vals
@@ -328,7 +362,7 @@ class BPT {
     let index = 0
     let exists = false
     for (let v of node.vals) {
-      if ((await this.data(v)) >= val) {
+      if (this.comp(val, await this.data(v)) >= 0) {
         node.vals.splice(index, 0, key)
         exists = true
         break
