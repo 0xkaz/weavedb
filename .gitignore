@@ -117,3 +117,5 @@ dist
 
 .now
 .vercel
+env.mk
+grpc-node/node-server/wallet.json
