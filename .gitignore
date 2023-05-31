@@ -109,8 +109,13 @@ dist
 # TernJS port file
 .tern-port
 
+### macOS ###
+# General
+.DS_Store
+.AppleDouble
+.LSOverride
+
 .now
 .vercel
-
 env.mk
 grpc-node/node-server/wallet.json

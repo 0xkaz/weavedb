@@ -10,6 +10,11 @@ import {
 import { nanoid } from "nanoid"
 import { useEffect, useState } from "react"
 import {
+  concat,
+  uniq,
+  is,
+  intersection,
+  difference,
   assoc,
   prepend,
   without,
@@ -32,10 +37,11 @@ import {
   map,
   keys,
 } from "ramda"
-
+import md5 from "md5"
 const BPT = require("../lib/BPT")
 const { gen, isErr, build } = require("../lib/utils")
 let tree = null
+let idtree = null
 let init = false
 
 let ids = {}
@@ -79,6 +85,8 @@ export default function Home() {
   const [store, setStore] = useState("{}")
   const [cols, setCols] = useState([])
   const [indexes, setIndexes] = useState({})
+  const [index, setIndex] = useState(null)
+  const [newIndex, setNewIndex] = useState("")
   const [col, setCol] = useState(null)
   const [order, setOrder] = useState(initial_order)
   const [schema, setSchema] = useState(default_schema)
@@ -91,9 +99,11 @@ export default function Home() {
   const [bool, setBool] = useState("true")
   const [str, setStr] = useState("")
   const [obj, setObj] = useState("")
+  const [update_type, setUpdateType] = useState("create")
   const [options, setOptions] = useState("{}")
   const [his, setHis] = useState([])
   const [limit, setLimit] = useState(5)
+  const [updateId, setUpdateId] = useState("")
   const [fields, setFields] = useState("age:asc,name:desc")
   const [field, setField] = useState("")
   const [field_type, setFieldType] = useState("number")
@@ -119,7 +129,7 @@ export default function Home() {
       data_type === "object" ? map(split(":"))(fields.split(",")) : null
     setCurrentFields(sort_fields)
     const kv = new KV()
-    tree = new BPT(order, sort_fields ?? data_type, kv, function (stats) {
+    tree = new BPT(order, sort_fields ?? data_type, kv, "", function (stats) {
       if (!isNil(setStore)) setStore(JSON.stringify(this.kv.store))
     })
     const arr =
@@ -187,8 +197,100 @@ export default function Home() {
     len = _len
     return _err
   }
-
+  const delData = async key => {
+    const _keys = keys(ids)
+    key = isNil(key) ? _keys[Math.floor(Math.random() * _keys.length)] : key
+    last_id = key
+    const __data = await tree.data(key)
+    const _data = __data.val
+    const id = key
+    const count = (await lf.getItem(`count-${col}`)) ?? 0
+    _his2 = append({ val: _data, op: "del", id: key }, _his2)
+    setHis(_his2)
+    const log = { id: count + 1, op: "delete", key: id }
+    await lf.setItem(`log-${col}-${count + 1}`, log)
+    await lf.setItem(`count-${col}`, count + 1)
+    isDel = true
+    const skey = `index.${col}/`
+    if (typeof _data === "object") {
+      for (const k in indexes) {
+        const fields = keys(_data)
+        const sp = map(v => v.split(":"))(k.split("/"))
+        const i_fields = compose(
+          without(["__name__"]),
+          map(v => v.split(":")[0])
+        )(k.split("/"))
+        const diff = difference(i_fields, fields)
+        if (i_fields.length > 0 && diff.length === 0) {
+          if (sp[0][1] === "array") {
+            if (is(Array, _data[sp[0][0]])) {
+              for (let v of _data[sp[0][0]]) {
+                const _md5 = md5(JSON.stringify(v))
+                const sort_fields = map(v => v.split(":"))(k.split("/"))
+                let akey = `${sort_fields[0][0]}:array:${_md5}`
+                if (sort_fields.length > 1) {
+                  akey += `/${map(v => v.join(":"))(tail(sort_fields)).join(
+                    "/"
+                  )}`
+                }
+                if (isNil(indexes[k].items[_md5])) continue
+                if (akey === index) {
+                  await tree.delete(id, true)
+                } else {
+                  const ar = sort_fields[0]
+                  let prefix = `${ar[0]}/array:${_md5}`
+                  const _sort_fields =
+                    sort_fields.length === 1
+                      ? [["__name__", "asc"]]
+                      : tail(sort_fields)
+                  if (sort_fields.length > 1) {
+                    prefix +=
+                      "/" + compose(join("/"), flatten)(tail(sort_fields))
+                  }
+                  const kv = new KV(skey)
+                  const tree = new BPT(5, _sort_fields, kv, prefix, function (
+                    stats
+                  ) {})
+                  await tree.delete(id, true)
+                }
+              }
+            }
+          } else {
+            const sort_fields = map(v => v.split(":"))(k.split("/"))
+            const prefix = `${compose(join("/"), flatten)(sort_fields)}`
+            if (k === index) {
+              await tree.delete(id, true)
+            } else {
+              const kv = new KV(skey)
+              const tree = new BPT(5, sort_fields, kv, prefix, function (
+                stats
+              ) {})
+              await tree.delete(id, true)
+            }
+          }
+        }
+      }
+    }
+    await idtree.delete(key)
+    delete ids[key]
+    const _err = isErr(
+      idtree.kv.store,
+      currentOrder,
+      last_id,
+      isDel,
+      prev_count
+    )
+    setExErr(_err)
+    const [err, where, arrs, _len, _vals] = _err
+    prev_count = _len
+    len = _len
+    setStore(JSON.stringify(tree.kv.store))
+    return _err
+  }
   const del = async key => {
+    if (!isNil(col)) {
+      return await delData(key)
+    }
     const _keys = keys(ids)
     key = isNil(key) ? _keys[Math.floor(Math.random() * _keys.length)] : key
     last_id = key
@@ -245,61 +347,465 @@ export default function Home() {
     ;(async () => {
       if (!isNil(col)) {
         setExErr([false, null])
-        const count = (await lf.getItem(`count-${col}`)) ?? 0
-        const _indexes = (await lf.getItem(`indexes-${col}`)) || {}
-        setCurrentFields([["__id__", "asc"]])
-        setCurrentType("object")
-        setHis([])
         _his2 = []
+        const count = (await lf.getItem(`count-${col}`)) ?? 0
+        const index_key = `indexes-${col}`
+        let _indexes = (await lf.getItem(index_key)) || {}
+        setIndex("__name__:asc")
+        setCurrentFields([["__name__", "asc"]])
+        setCurrentType("object")
         ids = {}
-        setCurrentOrder(3)
-        setHis(_his2)
-        const kv = new KV(col)
-        tree = new BPT(3, [["__id__", "asc"]], kv, function (stats) {
-          if (!isNil(setStore)) setStore(JSON.stringify(this.kv.store))
+        setCurrentOrder(5)
+        const kv = new KV(`index.${col}/`)
+        tree = new BPT(5, [["__name__", "asc"]], kv, "__name__/asc", function (
+          stats
+        ) {
+          if (!isNil(setStore) && index === "__name__:asc") {
+            setStore(JSON.stringify(this.kv.store))
+          }
         })
+        idtree = tree
         prev_count = 0
-        if (isNil(_indexes["__id__:asc"])) {
+        for (let i = 1; i <= count; i++) {
+          const _log = await lf.getItem(`log-${col}-${i}`)
+          if (_log.op === "update") continue
+          _his2.push({
+            val: _log.val,
+            op: _log.op === "create" ? "insert" : "del",
+            id: _log.key,
+          })
+        }
+        if (isNil(_indexes["__name__:asc"])) {
           for (let i = 1; i <= count; i++) {
             const _log = await lf.getItem(`log-${col}-${i}`)
-            await tree.insert(_log.key, _log.val)
+            if (_log.op === "craete") {
+              await tree.insert(_log.key, _log.val, true)
+            } else if (_log.op === "update") {
+              let _data = await tree.data(_log.id)
+              for (let k in _log.val) {
+                if (_log.val[k].__op === "del") {
+                  delete data[k]
+                } else {
+                  data[k] = _log.val[k]
+                }
+              }
+              await tree.delete(_log.key, true)
+              await tree.insert(_log.key, _log.data, true)
+            } else {
+              await tree.delete(_log.key, true)
+            }
           }
-          const new_indexes = assoc("__id__:asc", { order: 100 }, _indexes)
-          setIndexes(new_indexes)
-          await lf.setItem(
-            `indexes-${col}`,
-            assoc("__id__:asc", { order: 3 }, _indexes)
-          )
+          const key = "__name__:asc"
+          _indexes = assoc(key, { order: 5, key }, _indexes)
+          setIndexes(_indexes)
         } else {
           setIndexes(_indexes)
-          let i = 0
-          while (true) {
-            let node = await tree.kv.get(i)
-            if (i === 0) {
-              await tree.root(i)
-              await tree.get("count")
-            }
-            if (isNil(node)) break
+          let root = await tree.root()
+          await tree.get("count")
+          const getNode = async root => {
+            let node = await tree.get(root)
             if (node.leaf) {
               for (let v of node.vals) {
                 await tree.data(v)
                 prev_count += 1
               }
             } else {
-              for (let v of node.children) {
-                await tree.get(v)
+              for (let v of node.children) await getNode(v)
+            }
+          }
+          if (!isNil(root)) {
+            await getNode(root)
+          }
+        }
+        /*
+        if (typeof _data === "object") {
+          let _indexes = clone(indexes)
+          for (const k in _data) {
+            const key = `${k}:asc`
+            if (isNil(indexes[key])) _indexes[key] = { order: 5, key }
+            if (key === index) {
+            await tree.insert(id, _data,true)
+            } else {
+              const kv = new KV(`index.${col}/`)
+              const _tree = new BPT(5, [[k, "asc"]], kv, `${k}/asc`,function (stats) {})
+              await _tree.insert(id, _data,true)
+            }
+          }
+          await lf.setItem(`indexes-${col}`, _indexes)
+          setIndexes(_indexes)
+          for (const k in indexes) {
+            const fields = keys(_data)
+            const i_fields = compose(
+              without(["__name__"]),
+              map(v => v.split(":")[0])
+            )(k.split("/"))
+            const diff = difference(i_fields, fields)
+            if (i_fields.length > 1 && diff.length === 0) {
+              const kv = new KV(`index.${col}/`)
+              const sort_fields = map(v => v.split(":"))(k.split("/"))
+              if (k === index) {
+              await tree.insert(id, _data,true)
+              } else {
+              const tree = new BPT(5, sort_fields, kv, `${k}/asc`,function (stats) {})
+              await tree.insert(id, _data,true)
               }
             }
-            i++
           }
-          console.log(tree)
-        }
+          }*/
+        await lf.setItem(index_key, _indexes)
         setStore(JSON.stringify(tree.kv.store))
+        setHis(_his2)
       }
     })()
   }, [col])
+
+  useEffect(() => {
+    ;(async () => {
+      if (!isNil(index)) {
+        const sort_fields = map(v => v.split(":"))(index.split("/"))
+        if (index === "__name__:asc") {
+          tree = idtree
+        } else {
+          let key = `index.${col}/`
+          let prefix = ""
+          let _sort_fields = sort_fields
+          if (sort_fields[0][1] === "array") {
+            const ar = sort_fields[0]
+            prefix += `${ar[0]}/array:${ar[2]}`
+            _sort_fields =
+              sort_fields.length === 1
+                ? [["__name__", "asc"]]
+                : tail(sort_fields)
+            if (sort_fields.length > 1) {
+              prefix += "/" + compose(join("/"), flatten)(tail(sort_fields))
+            }
+            _sort_fields = concat(_sort_fields, tail(sort_fields))
+          } else {
+            prefix += compose(join("/"), flatten)(sort_fields)
+          }
+          const kv = new KV(key)
+          tree = new BPT(5, _sort_fields, kv, prefix, function (stats) {
+            if (!isNil(setStore)) setStore(JSON.stringify(this.kv.store))
+          })
+          let root = await tree.root()
+          await tree.get("count")
+          const getNode = async root => {
+            let node = await tree.get(root)
+            if (isNil(node)) return null
+            if (node.leaf) {
+              for (let v of node.vals) {
+                await tree.data(v)
+              }
+            } else {
+              for (let v of node.children) await getNode(v)
+            }
+          }
+          if (!isNil(root)) await getNode(root)
+        }
+        setStore(JSON.stringify(tree?.kv?.store))
+        setCurrentFields(sort_fields)
+      }
+    })()
+  }, [index])
+
   let { nodemap, arrs } = build(store)
-  const addData = async () => {
+  const updateData = async (id, _data) => {
+    let old_data = await idtree.data(id)
+    if (!isNil(old_data?.val)) {
+      let data = clone(old_data.val)
+      let dels = []
+      let changes = []
+      let news = []
+      const count = (await lf.getItem(`count-${col}`)) ?? 0
+      const log = { id: count + 1, op: "update", val: _data, key: id }
+      await lf.setItem(`log-${col}-${count + 1}`, log)
+      await lf.setItem(`count-${col}`, count + 1)
+
+      if (typeof _data === "object") {
+        let _indexes = clone(indexes)
+        // need to check updated array
+        for (let k in _data) {
+          // new data is array
+          if (
+            _data[k].__op === "arrayUnion" ||
+            _data[k].__op === "arrayRemove" ||
+            is(Array, _data[k])
+          ) {
+            let new_vals = []
+            if (_data[k].__op === "arrayUnion") {
+              new_vals = map(v => md5(JSON.stringify(v)))(
+                concat(data[k], _data[k].__op)
+              )
+            } else if (_data[k].__op === "arrayUnion") {
+              new_vals = map(v => md5(JSON.stringify(v)))(
+                without(_data[k].__op, data[k])
+              )
+            } else {
+              new_vals = map(v => md5(JSON.stringify(v)))(_data[k])
+            }
+            new_vals = uniq(new_vals)
+            if (is(Array, data[k])) {
+              const old_vals = compose(
+                uniq,
+                map(v => md5(JSON.stringify(v)))
+              )(data[k])
+              // both data are arrays => remove old fields and add new fields
+              const _add = difference(new_vals, old_vals)
+              const _remove = difference(old_vals, new_vals)
+              for (let v of _add) news.push(`${k}:array:${v}`)
+              for (let v of _remove) dels.push(`${k}:array:${v}`)
+            } else {
+              // old data isn't array => only add new fields
+              for (let v of new_vals) news.push(`${k}:array:${v}`)
+            }
+          } else if (is(Array, data[k])) {
+            // old data is array but new data isn't
+            const old_vals = compose(
+              uniq,
+              map(v => md5(JSON.stringify(v)))
+            )(data[k])
+            for (let v of old_vals) dels.push(`${k}:array:${v}`)
+          }
+          if (_data[k].__op === "del") {
+            dels.push(k)
+            delete data[k]
+          } else {
+            if (isNil(data[k])) {
+              news.push(k)
+            } else if (data[k] !== _data[k]) {
+              changes.push(k)
+            }
+            // __op needs to be worked separately => handle this later
+            data[k] = _data[k]
+          }
+        }
+        let newkeys = {}
+        for (const k of dels) {
+          const sp = k.split(":")
+          const key = sp[1] === "array" ? k : `${k}:asc`
+          const prefix =
+            sp[1] === "array" ? `${sp[0]}/${sp[1]}:${sp[2]}` : `${k}/asc`
+          newkeys[key] = true
+          if (index !== key) {
+            const kv = new KV(`index.${col}/`)
+            const sort_fields =
+              sp[1] === "array" ? [["__name__", "asc"]] : [[k, "asc"]]
+            const _tree = new BPT(5, sort_fields, kv, prefix, function (
+              stats
+            ) {})
+            await _tree.delete(id, true)
+          } else {
+            await tree.delete(id, true)
+          }
+        }
+        await idtree.putData(id, data)
+        for (const k of news) {
+          const sp = k.split(":")
+          const key = sp[1] === "array" ? k : `${k}:asc`
+          let prefix =
+            sp[1] === "array" ? `${sp[0]}/${sp[1]}:${sp[2]}` : `${k}/asc`
+          newkeys[key] = true
+          const kv = new KV(`index.${col}/`)
+          if (sp[1] === "array") {
+            const akey = `${sp[0]}:${sp[1]}`
+            if (isNil(_indexes[akey])) _indexes[akey] = { key: akey, items: {} }
+            if (isNil(_indexes[akey].items[sp[2]])) {
+              _indexes[akey].items[sp[2]] = { key, order: 5 }
+            }
+            if (index !== k) {
+              const sort_fields = map(v => v.split(":"))(k.split("/"))
+              let _sort_fields =
+                sort_fields.length === 1
+                  ? [["__name__", "asc"]]
+                  : tail(sort_fields)
+              if (sort_fields.length > 1) {
+                prefix += "/" + compose(join("/"), flatten)(tail(sort_fields))
+              }
+              const _tree = new BPT(5, sort_fields, kv, prefix, function (
+                stats
+              ) {})
+              await _tree.insert(id, _data, true)
+            } else {
+              await tree.insert(id, _data, true)
+            }
+          } else {
+            if (isNil(_indexes[key])) _indexes[key] = { order: 5, key }
+            if (index !== key) {
+              const sort_fields = [[k, "asc"]]
+              const _tree = new BPT(5, sort_fields, kv, prefix, function (
+                stats
+              ) {})
+              await _tree.insert(id, _data, true)
+            } else {
+              await tree.insert(id, _data, true)
+            }
+          }
+        }
+        await lf.setItem(`indexes-${col}`, _indexes)
+        setIndexes(_indexes)
+        const fields = keys(data)
+        const old_fields = keys(old_data.val)
+        for (const k in _indexes) {
+          if (isNil(newkeys[k])) {
+            // not updated yet
+            const sort_fields = map(v => v.split(":"))(k.split("/"))
+            const i_fields = compose(
+              without(["__name__"]),
+              map(v => v.split(":")[0])
+            )(k.split("/"))
+            const kv = new KV(`index.${col}/`)
+            if (i_fields.length > 1) {
+              // if array we need a separate check
+              if (sort_fields[0][1] === "array") {
+                const arr_name = sort_fields[0][0]
+                const new_arr_vals = is(Array, data[arr_name])
+                  ? compose(
+                      uniq,
+                      map(v => md5(JSON.stringify(v)))
+                    )(data[arr_name])
+                  : []
+                const old_arr_vals = is(Array, old_data.val[arr_name])
+                  ? compose(
+                      uniq,
+                      map(v => md5(JSON.stringify(v)))
+                    )(old_data.val[arr_name])
+                  : []
+                const val_added = difference(new_arr_vals, old_arr_vals)
+                const val_removed = difference(old_arr_vals, new_arr_vals)
+                const val_unchanged = intersection(old_arr_vals, new_arr_vals)
+                const _fields = without([arr_name])(fields)
+                const _old_fields = without([arr_name])(old_fields)
+                const _i_fields = without([arr_name])(i_fields)
+                const diff = difference(_i_fields, _fields)
+                const old_diff = difference(_i_fields, _old_fields)
+                if (diff.length === 0 || old_diff.length === 0) {
+                  let isAdd = false
+                  let isDel = false
+                  if (intersection(_i_fields, news).length > 0) isAdd = true
+                  if (intersection(_i_fields, changes).length > 0) {
+                    isDel = true
+                    isAdd = true
+                  }
+                  if (intersection(_i_fields, dels).length > 0) {
+                    isDel = true
+                    isAdd = false
+                  }
+                  const isChange =
+                    isAdd && isDel
+                      ? "change"
+                      : isAdd
+                      ? "add"
+                      : isDel
+                      ? "del"
+                      : "same"
+                  let _add = []
+                  let _del = []
+                  let _change = []
+                  for (let v of val_added) _add.push(v)
+                  for (let v of val_removed) _del.push(v)
+                  for (let v of val_unchanged) {
+                    if (isChange === "add") {
+                      _add.push(v)
+                    } else if (isChange === "del") {
+                      _del.push(v)
+                    } else if (isChange === "change") {
+                      _change.push(v)
+                    }
+                  }
+                  const sort_tail = map(join(":"))(tail(sort_fields)).join("/")
+                  const getKey = v => `${arr_name}:array:${v}/${sort_tail}`
+                  const getPrefix = v =>
+                    `${arr_name}/array:${v}/${compose(
+                      join("/"),
+                      flatten
+                    )(tail(sort_fields))}`
+                  const ins = async tree => await tree.insert(id, _data, true)
+                  const del = async tree => await tree.delete(id, true)
+                  const getTree = v =>
+                    new BPT(
+                      5,
+                      tail(sort_fields),
+                      kv,
+                      getPrefix(v),
+                      function () {}
+                    )
+                  for (let v of _add) {
+                    const akey = getKey(v)
+                    await ins(akey === index ? tree : getTree(v))
+                    if (isNil(_indexes[k].items[v])) {
+                      _indexes[k].items[v] = { key: akey, order: 5 }
+                    }
+                  }
+                  for (let v of _del)
+                    await del(getKey(v) === index ? tree : getTree(v))
+                  for (let v of _change) {
+                    const _tree = getKey(v) === index ? tree : getTree(v)
+                    await del(_tree)
+                    await ins(_tree)
+                  }
+                }
+              }
+              const diff = difference(i_fields, fields)
+              const old_diff = difference(i_fields, old_fields)
+              if (diff.length === 0 || old_diff.length === 0) {
+                let isAdd = false
+                let isDel = false
+                if (intersection(i_fields, news).length > 0) isAdd = true
+                if (intersection(i_fields, changes).length > 0) {
+                  isDel = true
+                  isAdd = true
+                }
+                if (intersection(i_fields, dels).length > 0) {
+                  isDel = true
+                  isAdd = false
+                }
+                if (isDel) {
+                  const prefix = `${compose(join("/"), flatten)(sort_fields)}`
+                  if (k === index) {
+                    await tree.delete(id, true)
+                  } else {
+                    const tree = new BPT(5, sort_fields, kv, prefix, function (
+                      stats
+                    ) {})
+                    await tree.delete(id, true)
+                  }
+                }
+                if (isAdd) {
+                  const sort_fields = map(v => v.split(":"))(k.split("/"))
+                  const prefix = `${compose(join("/"), flatten)(sort_fields)}`
+                  if (k === index) {
+                    await tree.insert(id, _data, true)
+                  } else {
+                    const tree = new BPT(5, sort_fields, kv, prefix, function (
+                      stats
+                    ) {})
+                    await tree.insert(id, _data, true)
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+
+  const addRandomData = async () => {
+    let obj = {}
+    for (let v of currentSchema) {
+      if (Math.random() < 0.5) continue
+      if (v.type === "string") {
+        obj[v.key] = gen("string")
+      } else if (v.type === "number") {
+        obj[v.key] = gen("number")
+      } else {
+        obj[v.key] = gen("boolean")
+      }
+    }
+    await addData(JSON.stringify(obj))
+  }
+
+  const addData = async data => {
     let _data = null
     isDel = false
     try {
@@ -312,14 +818,24 @@ export default function Home() {
       alert("data must be an object")
       return
     }
+    if (update_type === "update") {
+      await updateData(updateId, _data)
+      return
+    }
     const count = (await lf.getItem(`count-${col}`)) ?? 0
     const id = nanoid()
     last_id = id
     const log = { id: count + 1, op: "create", val: _data, key: id }
     await lf.setItem(`log-${col}-${count + 1}`, log)
     await lf.setItem(`count-${col}`, count + 1)
-    await tree.insert(id, _data)
-    const _err = isErr(tree.kv.store, currentOrder, last_id, isDel, prev_count)
+    await idtree.insert(id, _data)
+    const _err = isErr(
+      idtree.kv.store,
+      currentOrder,
+      last_id,
+      isDel,
+      prev_count
+    )
     setExErr(_err)
     const [err, where, arrs, _len, _vals] = _err
     prev_count = _len
@@ -327,6 +843,98 @@ export default function Home() {
     setData("{}")
     _his2 = append({ val: _data, op: "insert", id }, _his2)
     setHis(_his2)
+    if (typeof _data === "object") {
+      let _indexes = clone(indexes)
+      for (const k in _data) {
+        const key = `${k}:asc`
+        if (isNil(indexes[key])) _indexes[key] = { order: 5, key }
+        if (key === index) {
+          await tree.insert(id, _data, true)
+        } else {
+          const kv = new KV(`index.${col}/`)
+          const _tree = new BPT(5, [[k, "asc"]], kv, `${k}/asc`, function (
+            stats
+          ) {})
+          await _tree.insert(id, _data, true)
+        }
+        if (is(Array, _data[k])) {
+          for (let v of uniq(_data[k])) {
+            const _prefix = `${k}:array`
+            const _md5 = md5(JSON.stringify(v))
+            const key = `${_prefix}:${_md5}`
+            if (isNil(_indexes[_prefix]))
+              _indexes[_prefix] = { key: _prefix, items: {} }
+            if (isNil(_indexes[_prefix].items[_md5])) {
+              _indexes[_prefix].items[_md5] = { order: 5, key }
+            }
+            if (key === index) {
+              await tree.insert(id, _data, true)
+            } else {
+              const kv = new KV(`index.${col}/`)
+              const _tree = new BPT(
+                5,
+                [["__name__", "asc"]],
+                kv,
+                `${k}/array:${md5(JSON.stringify(v))}`,
+                function (stats) {}
+              )
+              await _tree.insert(id, _data, true)
+            }
+          }
+        }
+      }
+      const fields = keys(_data)
+      for (const k in indexes) {
+        const i_fields = compose(
+          without(["__name__"]),
+          map(v => v.split(":")[0])
+        )(k.split("/"))
+        const diff = difference(i_fields, fields)
+        if (i_fields.length > 1 && diff.length === 0) {
+          const sort_fields = map(v => v.split(":"))(k.split("/"))
+          const skey = `index.${col}/`
+          if (sort_fields[0][1] === "array") {
+            if (!is(Array, _data[sort_fields[0][0]])) continue
+            for (let v of _data[sort_fields[0][0]]) {
+              const prefix = `${compose(join("/"), flatten)(tail(sort_fields))}`
+              const _md5 = md5(JSON.stringify(v))
+              const _prefix = `${sort_fields[0][0]}/array:${_md5}`
+              const key = `${_prefix}/${prefix}`
+              const akey = `${sort_fields[0][0]}:array:${_md5}/${map(v =>
+                v.join(":")
+              )(tail(sort_fields)).join("/")}`
+              let _tree = null
+              if (akey === index) {
+                _tree = tree
+              } else {
+                const kv = new KV(`index.${col}/`)
+                _tree = new BPT(5, tail(sort_fields), kv, key, function (
+                  stats
+                ) {})
+                if (isNil(_indexes[k].items[_md5])) {
+                  _indexes[k].items[_md5] = { order: 5, key: akey }
+                }
+              }
+              await _tree.insert(id, _data, true)
+            }
+          } else {
+            const prefix = `${compose(join("/"), flatten)(sort_fields)}`
+            if (k === index) {
+              await tree.insert(id, _data, true)
+            } else {
+              const kv = new KV(skey)
+              const tree = new BPT(5, sort_fields, kv, prefix, function (
+                stats
+              ) {})
+              await tree.insert(id, _data, true)
+            }
+          }
+        }
+      }
+      await lf.setItem(`indexes-${col}`, _indexes)
+      setIndexes(_indexes)
+    }
+    setStore(JSON.stringify(tree.kv.store))
     return _err
   }
   const addNumber = async () => {
@@ -368,6 +976,9 @@ export default function Home() {
     }, 100)
   }
   const [err, where] = exErr
+  const _indexes = []
+  for (let k in indexes) _indexes.push(indexes[k])
+
   return (
     <ChakraProvider>
       <style global jsx>{`
@@ -444,6 +1055,237 @@ export default function Home() {
             </Flex>
           ))(prepend(null, cols))}
         </Box>
+        {isNil(col) ? null : (
+          <>
+            <Box as="hr" my={3} />
+            <Box flex={1}>
+              <Flex mx={2} mt={2} color="#666" mb={1} fontSize="10px">
+                Indexes
+              </Flex>
+              <Box px={3}>
+                {map(v => {
+                  return !isNil(v.items) ? (
+                    <>
+                      <Flex color={index === v.key ? "#6441AF" : "#666"}>
+                        <Box
+                          flex={1}
+                          color="#999"
+                          sx={{
+                            cursor: "pointer",
+                            ":hover": { opacity: 0.75 },
+                          }}
+                        >
+                          {v.key}
+                        </Box>
+                      </Flex>
+                      {compose(
+                        map(v2 => {
+                          return (
+                            <Flex color={index === v2.key ? "#6441AF" : "#666"}>
+                              <Box
+                                px={2}
+                                flex={1}
+                                onClick={() => setIndex(v2.key)}
+                                sx={{
+                                  cursor: "pointer",
+                                  ":hover": { opacity: 0.75 },
+                                  overflowX: "hidden",
+                                }}
+                              >
+                                {v2.key.slice(0, 23)}...
+                              </Box>
+                              {v2 === null ? null : (
+                                <Box
+                                  onClick={async () => {
+                                    console.log(v2)
+                                  }}
+                                  sx={{
+                                    cursor: "pointer",
+                                    ":hover": { opacity: 0.75 },
+                                  }}
+                                >
+                                  x
+                                </Box>
+                              )}
+                            </Flex>
+                          )
+                        }),
+                        values
+                      )(v.items)}
+                    </>
+                  ) : (
+                    <Flex color={index === v.key ? "#6441AF" : "#666"}>
+                      <Box
+                        flex={1}
+                        onClick={() => setIndex(v.key)}
+                        sx={{ cursor: "pointer", ":hover": { opacity: 0.75 } }}
+                      >
+                        {v.key}
+                      </Box>
+                      {v === null ? null : (
+                        <Box
+                          onClick={async () => {
+                            console.log(v)
+                          }}
+                          sx={{
+                            cursor: "pointer",
+                            ":hover": { opacity: 0.75 },
+                          }}
+                        >
+                          x
+                        </Box>
+                      )}
+                    </Flex>
+                  )
+                })(_indexes)}
+              </Box>
+              <Flex mt={2} px={2}>
+                <Input
+                  onChange={e => setNewIndex(e.target.value)}
+                  placeholder="Index"
+                  value={newIndex}
+                  height="auto"
+                  flex={1}
+                  bg="white"
+                  fontSize="12px"
+                  py={1}
+                  px={3}
+                  sx={{ borderRadius: "3px 0 0 3px" }}
+                />
+                <Flex
+                  width="80px"
+                  align="center"
+                  p={1}
+                  justify="center"
+                  bg="#666"
+                  color="white"
+                  onClick={async () => {
+                    const sort_fields = map(v => {
+                      const ind = v.split(":")
+                      const ord = ind.length < 2 ? "desc" : ind[1]
+                      return [ind[0], ord]
+                    })(newIndex.split("/"))
+                    let i = 0
+                    for (let v of sort_fields) {
+                      if (v[1] === "array") {
+                        if (i !== 0) {
+                          alert("array index should come first")
+                          return
+                        }
+                      } else if (!includes(v[1], ["asc", "desc"])) {
+                        alert("sort order should be either asc or desc")
+                        return
+                      }
+                      i++
+                    }
+                    if (sort_fields.length <= 1) {
+                      alert("You can only add multi-field indexes")
+                      return
+                    }
+                    const index_key = `indexes-${col}`
+                    let __indexes = (await lf.getItem(index_key)) || {}
+                    if (!isNil(__indexes[newIndex])) return alert("exists")
+                    const count = (await lf.getItem(`count-${col}`)) ?? 0
+                    let docs = {}
+                    for (let i = 1; i <= count; i++) {
+                      // need to handle updates...
+                      const _log = await lf.getItem(`log-${col}-${i}`)
+                      if (_log.op === "create") {
+                        docs[_log.key] = true
+                      } else if (_log.op === "del") {
+                        delete docs[_log.key]
+                      }
+                    }
+                    const i_fields = compose(
+                      without(["__name__"]),
+                      map(v => v.split(":")[0])
+                    )(newIndex.split("/"))
+                    const skey = `index.${col}/`
+                    if (sort_fields[0][1] === "array") {
+                      let array_indexes = {}
+                      let kvs = {}
+                      for (let k in docs) {
+                        let _data = await idtree.data(k)
+                        const fields = keys(_data.val)
+                        const diff = difference(i_fields, fields)
+                        if (
+                          i_fields.length > 0 &&
+                          diff.length === 0 &&
+                          is(Array, _data.val[i_fields[0]])
+                        ) {
+                          for (const v of _data.val[i_fields[0]]) {
+                            const prefix = `${compose(
+                              join("/"),
+                              flatten
+                            )(tail(sort_fields))}`
+                            const _md5 = md5(JSON.stringify(v))
+                            const _prefix = `${sort_fields[0][0]}/array:${_md5}`
+                            const key = `${_prefix}/${prefix}`
+                            let _tree = null
+                            const akey = `${
+                              sort_fields[0][0]
+                            }:array:${_md5}/${map(v => v.join(":"))(
+                              tail(sort_fields)
+                            ).join("/")}`
+                            if (isNil(kvs[_md5])) {
+                              array_indexes[_md5] = { order: 5, key: akey }
+                              const kv = new KV(`index.${col}/`)
+                              _tree = new BPT(
+                                5,
+                                tail(sort_fields),
+                                kv,
+                                key,
+                                function (stats) {}
+                              )
+                            } else {
+                              _tree = kvs[_md5]
+                            }
+                            await _tree.insert(k, _data.val, true)
+                          }
+                        }
+                      }
+                      __indexes[newIndex] = {
+                        key: newIndex,
+                        items: array_indexes,
+                      }
+                    } else {
+                      __indexes[newIndex] = { order: 5, key: newIndex }
+                      const prefix = `${compose(
+                        join("/"),
+                        flatten
+                      )(sort_fields)}`
+                      const kv = new KV(skey)
+                      const tree = new BPT(
+                        5,
+                        sort_fields,
+                        kv,
+                        prefix,
+                        function (stats) {}
+                      )
+                      for (let k in docs) {
+                        let _data = await idtree.data(k)
+                        const fields = keys(_data.val)
+                        const diff = difference(i_fields, fields)
+                        if (i_fields.length > 0 && diff.length === 0) {
+                          await tree.insert(k, _data.val, true)
+                        }
+                      }
+                    }
+                    setIndexes(__indexes)
+                    await lf.setItem(index_key, __indexes)
+                  }}
+                  sx={{
+                    borderRadius: "0 3px 3px 0",
+                    cursor: "pointer",
+                    ":hover": { opacity: 0.75 },
+                  }}
+                >
+                  Add
+                </Flex>
+              </Flex>
+            </Box>
+          </>
+        )}
         {!isNil(col) ? null : (
           <>
             <Box as="hr" my={3} />
@@ -683,8 +1525,32 @@ export default function Home() {
         )}
         <Box as="hr" my={3} />
         <Flex mx={2} mt={2} color="#666" mb={1} fontSize="10px">
-          Add Value
+          {map(v => (
+            <Box
+              mr={2}
+              sx={{ cursor: "pointer" }}
+              color={v.key === update_type ? "#6441AF" : "#333"}
+              onClick={() => setUpdateType(v.key)}
+            >
+              {v.key}
+            </Box>
+          ))([{ key: "create" }, { key: "update" }])}
         </Flex>
+        {update_type !== "update" ? null : (
+          <Flex mx={2} mb={2}>
+            <Input
+              height="auto"
+              py={1}
+              px={3}
+              bg="white"
+              fontSize="12px"
+              placeholder="docid"
+              sx={{ borderRadius: "3px 0 0 3px" }}
+              value={updateId}
+              onChange={e => setUpdateId(e.target.value)}
+            />
+          </Flex>
+        )}
         <Flex mx={2} mb={2}>
           {!isNil(col) || currentType !== "boolean" ? (
             <Input
@@ -727,7 +1593,7 @@ export default function Home() {
               onKeyDown={async e => {
                 if (e.code === "Enter") {
                   !isNil(col)
-                    ? addData()
+                    ? addData(data)
                     : currentType === "number"
                     ? addNumber()
                     : currentType === "string"
@@ -762,7 +1628,7 @@ export default function Home() {
             onClick={async () => {
               if (err) return
               !isNil(col)
-                ? addData()
+                ? addData(data)
                 : currentType === "number"
                 ? addNumber()
                 : currentType === "string"
@@ -777,32 +1643,34 @@ export default function Home() {
               ":hover": { opacity: 0.75 },
             }}
           >
-            Add
+            {update_type === "update" ? "Update" : "Add"}
           </Flex>
         </Flex>
-        <Flex
-          m={2}
-          p={1}
-          justify="center"
-          bg="#666"
-          color="white"
-          onClick={async () => {
-            if (err) return
-            if (!isNil(col)) {
-              await addData()
-            } else {
-              const num = gen(currentType, currentSchema)
-              await insert(num)
-            }
-          }}
-          sx={{
-            borderRadius: "3px",
-            cursor: "pointer",
-            ":hover": { opacity: 0.75 },
-          }}
-        >
-          Add Random Value
-        </Flex>
+        {!isNil(col) && update_type === "update" ? null : (
+          <Flex
+            m={2}
+            p={1}
+            justify="center"
+            bg="#666"
+            color="white"
+            onClick={async () => {
+              if (err) return
+              if (!isNil(col)) {
+                await addRandomData()
+              } else {
+                const num = gen(currentType, currentSchema)
+                await insert(num)
+              }
+            }}
+            sx={{
+              borderRadius: "3px",
+              cursor: "pointer",
+              ":hover": { opacity: 0.75 },
+            }}
+          >
+            Add Random Value
+          </Flex>
+        )}
         <Box as="hr" my={3} />
         <Flex mx={2} mt={2} color="#666" mb={1} fontSize="10px">
           Auto Test
@@ -1004,14 +1872,14 @@ export default function Home() {
                             ? compose(
                                 join(":"),
                                 map(v4 => {
-                                  return v4[0] === "__id__"
+                                  return v4[0] === "__name__"
                                     ? typeof v3.key === "object"
-                                      ? v3.key.__id__
+                                      ? v3.key.__name__
                                       : v3.key
                                     : v3val[v4[0]]
                                 })
                               )(currentFields || [])
-                            : "-"
+                            : v3.key
                           return (
                             <Flex
                               px={1}
@@ -1034,7 +1902,7 @@ export default function Home() {
                               }}
                               title={
                                 typeof v3.key === "object"
-                                  ? v3.key.__id__
+                                  ? v3.key.__name__
                                   : v3.key ?? null
                               }
                               onClick={async () => {
@@ -1123,6 +1991,7 @@ export default function Home() {
                 )(his).join(", ")} ]`
               : map(v => (
                   <Flex
+                    onClick={() => setUpdateId(v.id)}
                     title={v.id}
                     justify="center"
                     align="center"
@@ -1133,7 +2002,12 @@ export default function Home() {
                     as="span"
                     color="white"
                     bg={v.op === "del" ? "salmon" : "#6441AF"}
-                    sx={{ borderRadius: "3px", wordBreak: "break-all" }}
+                    sx={{
+                      cursor: "pointer",
+                      ":hover": { opacity: 0.75 },
+                      borderRadius: "3px",
+                      wordBreak: "break-all",
+                    }}
                   >
                     {typeof v.val === "boolean"
                       ? v.val
@@ -1143,10 +2017,10 @@ export default function Home() {
                       ? compose(
                           join(":"),
                           map(v4 =>
-                            v4[0] === "__id__" ? v.id : v4[0] ?? v.val[v4[0]]
+                            v4[0] === "__name__" ? v.id : v.val[v4[0]] ?? "-"
                           )
                         )(currentFields || [])
-                      : v.val}
+                      : v.val ?? v.id}
                   </Flex>
                 ))(his)}
           </Flex>
