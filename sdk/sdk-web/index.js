@@ -168,10 +168,12 @@ class SDK extends Base {
     LmdbCache,
     createClient,
     WarpSubscriptionPlugin,
+    remoteStateSyncSource,
     useVM2,
     type = 1,
   }) {
     super()
+    this.remoteStateSyncSource = remoteStateSyncSource
     this.queue = []
     this.ongoing = false
     this.results = {}
@@ -243,7 +245,11 @@ class SDK extends Base {
     } else if (this.network === "testnet") {
       this.warp = this.Warp.WarpFactory.forTestnet()
     } else {
-      this.warp = this.Warp.WarpFactory.forMainnet()
+      this.warp = this.Warp.WarpFactory.forMainnet(
+        undefined,
+        undefined,
+        this.arweave
+      )
     }
     this.contractTxId = contractTxId
     if (all(complement(isNil))([contractTxId, wallet, name, version])) {
@@ -403,16 +409,19 @@ class SDK extends Base {
       .connect(wallet)
       .setEvaluationOptions(
         mergeLeft(evaluationOptions, {
+          internalWrites: true,
           remoteStateSyncEnabled: this.isNode
             ? false
             : this.network !== "localhost",
+          remoteStateSyncSource:
+            this.remoteStateSyncSource ?? "https://dre-2.warp.cc/contract",
           allowBigInt: true,
           useVM2: !isNil(this.useVM2)
             ? this.useVM2
             : typeof window !== "undefined"
             ? false
             : !this.old,
-          useKVStorage: this.type !== 1,
+          useKVStorage: true,
         })
       )
     dbs[this.contractTxId] = this
@@ -590,7 +599,7 @@ class SDK extends Base {
   }
 
   async write(func, param, dryWrite, bundle, relay = false, onDryWrite) {
-    const cache = !isNil(onDryWrite?.cache)
+    let cache = !isNil(onDryWrite?.cache)
       ? onDryWrite.cache
       : !this.nocache_default
     return new Promise(async (_res, rej) => {

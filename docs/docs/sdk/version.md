@@ -15,6 +15,37 @@ await db.getVersion()
 
 ## Change Logs
 
+### v0.27.0-alpha (May 20, 2023)
+
+#### Source Transaction Id
+
+[jsZqVEOGdMFAvVlof_WXi6DO5vWxhteiG91xVPiIwqQ](https://sonar.warp.cc/#/app/source/jsZqVEOGdMFAvVlof_WXi6DO5vWxhteiG91xVPiIwqQ)
+
+#### Added Features
+
+-  use [kv storage](https://academy.warp.cc/docs/sdk/advanced/kv-storage) for data and indexes
+- triggers
+
+### v0.26.2 (June 12, 2023)
+
+#### Source Transaction Id
+
+[-TBbRLWsP8wAlj8y5bh7RHRdwGJ7kT9urFvEbn1UomQ](https://sonar.warp.cc/#/app/source/-TBbRLWsP8wAlj8y5bh7RHRdwGJ7kT9urFvEbn1UomQ)
+
+#### Added Features
+
+-  [internal writes](/docs/sdk/relayers#internal-writes)
+
+### v0.26.1 (June 9, 2023)
+
+#### Source Transaction Id
+
+[OSYm83qQFF5gf4m3BbdZtrHMHjVAMPJcBhfZiJVYjYE](https://sonar.warp.cc/#/app/source/OSYm83qQFF5gf4m3BbdZtrHMHjVAMPJcBhfZiJVYjYE)
+
+#### Added Features
+
+-  fix a minor index bug
+
 ### v0.26.0 (Mar 21, 2023)
 
 #### Source Transaction Id
