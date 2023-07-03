@@ -1,6 +1,9 @@
 const { isNil, clone, mergeLeft } = require("ramda")
-const { handle } = require("weavedb-contracts/weavedb/contract")
-const { handle: handle_kv } = require("weavedb-contracts/weavedb-kv/contract")
+const base = "weavedb-contracts"
+const { handle } = require(`${base}/weavedb/contract`)
+const { handle: handle_kv } = require(`${base}/weavedb-kv/contract`)
+const version = require(`${base}/weavedb/lib/version`)
+const version_kv = require(`${base}/weavedb-kv/lib/version`)
 const Base = require("weavedb-base")
 const arweave = require("arweave")
 const { createId } = require("@paralleldrive/cuid2")
@@ -40,7 +43,7 @@ class OffChain extends Base {
       state,
       this.type === 1
         ? {
-            version: "0.23.0",
+            version,
             canEvolve: true,
             evolve: null,
             secure: true,
@@ -61,12 +64,12 @@ class OffChain extends Base {
             contracts: { ethereum: "ethereum", dfinity: "dfinity" },
           }
         : {
-            version: "0.24.0",
+            version: version_kv,
             canEvolve: true,
             evolve: null,
             secure: true,
             auth: {
-              algorithms: ["rsa256"],
+              algorithms: ["secp256k1", "secp256k1-2", "ed25519", "rsa256"],
               name: "weavedb",
               version: "1",
               links: {},
@@ -146,6 +149,7 @@ class OffChain extends Base {
           )
         }
       } catch (e) {
+        //console.log(typeof e === "object" ? e.message : e)
         error = e
       }
       const start = Date.now()
