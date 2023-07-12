@@ -1,4 +1,5 @@
 import { nanoid } from "nanoid"
+import Offchain from "weavedb-offchain"
 const { Ed25519KeyIdentity } = require("@dfinity/identity")
 import Arweave from "arweave"
 import lf from "localforage"
@@ -8,6 +9,8 @@ import { ethers } from "ethers"
 import { AuthClient } from "@dfinity/auth-client"
 import { WarpFactory } from "warp-contracts"
 const { DeployPlugin, ArweaveSigner } = require("warp-contracts-plugin-deploy")
+const { createId } = require("@paralleldrive/cuid2")
+
 import {
   trim,
   clone,
@@ -50,6 +53,7 @@ class Log {
     this.signer = signer
     this.id = id || nanoid()
   }
+
   async rec(array = false) {
     let res = {},
       err,
@@ -89,7 +93,7 @@ class Log {
       virtual_txid: _res?.result?.transaction?.id || null,
       txid:
         !isNil(_res) && !isNil(_res.originalTxId) ? _res.originalTxId : null,
-      node: this.node,
+      node: this.sdk.network === "offchain" ? "Offchain" : this.node,
       date,
       duration: date - this.start,
       method: this.method,
@@ -223,11 +227,25 @@ export const connectLocalhost = async ({ val: { port } }) => {
 }
 
 export const setupWeaveDB = async ({
-  val: { network, contractTxId, port, rpc, temp = false },
+  val: { network, contractTxId, port, rpc, temp = false, dre },
 }) => {
   let _sdk
   let isRPC = !isNil(rpc) && !/^\s*$/.test(rpc)
-  if (isRPC) {
+  if (network === "Offchain") {
+    _sdk = new Offchain({
+      contractTxId,
+      cache: {
+        initialize: async db => {
+          const state = await lf.getItem(`offchain-${contractTxId}`)
+          if (!isNil(state)) db.state = state
+        },
+        onWrite: async (tx, db) => {
+          await lf.setItem(`offchain-${contractTxId}`, db.state)
+        },
+      },
+    })
+    await _sdk.initialize()
+  } else if (isRPC) {
     try {
       _sdk = new Client({
         rpc,
@@ -238,6 +256,8 @@ export const setupWeaveDB = async ({
     }
   } else {
     _sdk = new SDK({
+      remoteStateSyncEnabled: !isNil(dre),
+      remoteStateSyncSource: dre,
       network: network.toLowerCase(),
       port,
       contractTxId,
@@ -254,7 +274,7 @@ export const setupWeaveDB = async ({
       await addFunds(arweave, arweave_wallet)
     } catch (e) {}
   }
-  if (!isRPC && !isNil(contractTxId)) {
+  if (!isRPC && !isNil(contractTxId) && network !== "Offchain") {
     await _sdk.init({
       contractTxId: contractTxId,
       wallet: arweave_wallet,
@@ -665,7 +685,33 @@ export const deployDB = async ({
   if (owner.length === 42 && owner.slice(0, 2) == "0x") {
     owner = owner.toLowerCase()
   }
-  if (network === "Mainnet") {
+  if (network === "Offchain") {
+    const contractTxId = createId()
+    const state = {
+      version,
+      canEvolve,
+      evolve: null,
+      secure,
+      data: {},
+      nonces: {},
+      ids: {},
+      indexes: {},
+      auth: {
+        algorithms: ["secp256k1", "secp256k1-2", "ed25519", "rsa256"],
+        name: "weavedb",
+        version: "1",
+        links: {},
+      },
+      crons: {
+        lastExecuted: 0,
+        crons: {},
+      },
+      contracts: { ethereum: "ethereum", dfinity: "dfinity" },
+      owner,
+    }
+    await lf.setItem(`offchain-${contractTxId}`, state)
+    return { contractTxId, network, port }
+  } else if (network === "Mainnet") {
     const warp = WarpFactory.forMainnet().use(new DeployPlugin())
     let initial_state = {
       src: weavedbSrcTxId[version],
@@ -1029,6 +1075,36 @@ export const addRelayerJob = async ({
       await new Log(sdk, "addRelayerJob", [name, job], opt, fn, signer).rec(
         true
       )
+    )
+  } catch (e) {
+    console.log(e)
+    return `Error: Something went wrong`
+  }
+}
+
+export const addTrigger = async ({
+  val: { name, on, contractTxId, func, col_path },
+  fn,
+}) => {
+  try {
+    const { err, opt, signer } = await fn(getOpt)({
+      contractTxId,
+    })
+    if (!isNil(err)) return alert(err)
+    let trigger = {
+      on,
+      key: name,
+      func,
+    }
+    return ret(
+      await new Log(
+        sdk,
+        "addTrigger",
+        [trigger, ...col_path],
+        opt,
+        fn,
+        signer
+      ).rec(true)
     )
   } catch (e) {
     console.log(e)

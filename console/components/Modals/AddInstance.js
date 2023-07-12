@@ -14,7 +14,13 @@ import {
 } from "ramda"
 import { inject } from "roidjs"
 import { read, deployDB, setupWeaveDB } from "../../lib/weavedb"
-import { wallet_chains, latest, preset_rpcs, rpc_types } from "../../lib/const"
+import {
+  wallet_chains,
+  latest,
+  preset_dres,
+  preset_rpcs,
+  rpc_types,
+} from "../../lib/const"
 import Modal from "../Modal"
 
 export default inject(
@@ -37,8 +43,10 @@ export default inject(
     setCurrentDB,
     setNewRPCType,
     presetRPC,
+    presetDRE,
     newRPCType,
     setPresetRPC,
+    setPresetDRE,
     nodes,
     setNewHttp,
     newHttp,
@@ -120,7 +128,7 @@ export default inject(
           mb={3}
         >
           {map(v => <option value={v}>{v}</option>)(
-            isNil(port) ? ["Mainnet"] : networks
+            isNil(port) ? ["Mainnet", "Offchain"] : networks
           )}
         </Select>
         {deployMode === "Deploy" ? (
@@ -315,14 +323,14 @@ export default inject(
             <Flex>
               <Select
                 mr={2}
-                w="130px"
+                w="165px"
                 value={newRPCType}
                 onChange={e => setNewRPCType(e.target.value)}
                 sx={{ borderRadius: 0 }}
               >
                 {map(v => <option value={v.key}>{v.name}</option>)(rpc_types)}
               </Select>
-              {newRPCType === "sdk" ? (
+              {newRPCType === "none" ? (
                 <Input flex={1} value="Browser Local Cache" disabled={true} />
               ) : newRPCType === "preset" ? (
                 <>
@@ -333,8 +341,19 @@ export default inject(
                     sx={{ borderRadius: 0 }}
                   >
                     {map(v => <option>{v}</option>)(
-                      compose(uniq, concat(preset_rpcs), pluck("rpc"))(nodes)
+                      compose(uniq, concat(preset_dres), pluck("rpc"))(nodes)
                     )}
+                  </Select>
+                </>
+              ) : newRPCType === "sdk" ? (
+                <>
+                  <Select
+                    flex={1}
+                    value={presetDRE}
+                    onChange={e => setPresetDRE(e.target.value)}
+                    sx={{ borderRadius: 0 }}
+                  >
+                    {map(v => <option>{v}</option>)(preset_dres)}
                   </Select>
                 </>
               ) : (
@@ -376,13 +395,15 @@ export default inject(
                     set("connect_to_db", "loading")
                     let db
                     const rpc =
-                      newRPCType === "sdk"
+                      newRPCType === "sdk" || newRPCType === "none"
                         ? null
                         : newRPCType === "preset"
                         ? presetRPC
                         : newHttp + newRPC2
+                    const dre = newRPCType !== "sdk" ? null : presetDRE
                     try {
                       db = await fn(setupWeaveDB)({
+                        dre,
                         network: newNetwork,
                         contractTxId: newContractTxId,
                         port: port || 1820,
@@ -403,6 +424,7 @@ export default inject(
                         } else {
                           setNetwork(newNetwork)
                           let newdb = {
+                            dre,
                             network: newNetwork,
                             port: newNetwork === "Localhost" ? port : 443,
                             contractTxId: newContractTxId,
@@ -412,7 +434,10 @@ export default inject(
                           await _setContractTxId(
                             newContractTxId,
                             newNetwork,
-                            rpc
+                            rpc,
+                            undefined,
+                            undefined,
+                            dre
                           )
                           setEditNetwork(false)
                           addDB(newdb)
