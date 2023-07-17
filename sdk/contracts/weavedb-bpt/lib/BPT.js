@@ -35,8 +35,10 @@ class BPT {
     this.min_vals = Math.ceil(this.order / 2) - 1
     this.prefix = prefix
   }
+
   get = async (key, stats, _prefix) =>
     stats?.[key] ?? (await this.kv.get(key, _prefix ?? `${this.prefix}/`))
+
   put = async (key, val, stats, _prefix, nosave) => {
     if (!isNil(stats)) {
       stats[key] = val
@@ -44,6 +46,7 @@ class BPT {
       await this.kv.put(key, val, _prefix ?? `${this.prefix}/`, nosave)
     }
   }
+
   del = async (key, stats, _prefix, nosave) => {
     if (!isNil(stats)) {
       stats[key] = { __del__: true }
@@ -51,13 +54,16 @@ class BPT {
       await this.kv.del(key, _prefix ?? `${this.prefix}/`, nosave)
     }
   }
-  putData = async (key, val, stats) => {
+
+  putData = async (key, val, stats, signer = null) => {
+    const obj = { setter: signer, val }
     if (!isNil(stats)) {
-      stats[`data/${key}`] = val
+      stats[`data/${key}`] = obj
     } else {
-      await this.put(`data/${key}`, val, stats, "")
+      await this.put(`data/${key}`, obj, stats, "")
     }
   }
+
   delData = async (key, stats) => {
     if (!isNil(stats)) {
       stats[`data/${key}`] = { __del__: true }
@@ -65,23 +71,36 @@ class BPT {
       await this.del(`data/${key}`, stats, "")
     }
   }
+
   putNode = async (node, stats) => await this.put(node.id, node, stats)
+
   data = async (key, cache = {}, stats) => {
-    if (typeof cache[key] !== "undefined") return { key, val: cache[key] }
+    if (typeof cache[key] !== "undefined")
+      return {
+        key,
+        val: cache[key]?.val ?? null,
+        setter: cache[key]?.setter ?? null,
+      }
     let _data = (await this.get(`data/${key}`, stats, "")) ?? null
     cache[key] = _data
-    return { key, val: _data }
+    return { key, val: _data?.val ?? null, setter: _data?.setter ?? null }
   }
+
   root = async stats => (await this.get("root", stats)) ?? null
+
   setRoot = async (id, stats) => (await this.put("root", id, stats)) ?? null
+
   isOver = (node, plus = 0) => node.vals.length + plus > this.max_vals
+
   isUnder = (node, plus = 0) => node.vals.length + plus < this.min_vals
+
   wrap = (val, key) => {
     let obj = { val }
-    if (!isNil(val.__name__)) obj.key = val.__name__
+    if (!isNil(val.__id__)) obj.key = val.__id__
     if (!isNil(key)) obj.key = key
     return obj
   }
+
   compArr(va, vb) {
     const _va = is(Array, va) ? va : [va]
     const _vb = is(Array, vb) ? vb : [vb]
@@ -93,13 +112,15 @@ class BPT {
     }
     return 0
   }
-  comp(a, b, null_last = false) {
-    if (typeof this.sort_fields === "string") {
+
+  comp(a, b, null_last = false, fields) {
+    fields ??= this.sort_fields
+    if (typeof fields === "string") {
       return a.val === b.val ? 0 : a.val < b.val ? 1 : -1
     } else {
-      for (const v of this.sort_fields) {
-        const va = v[0] === "__name__" ? a.key : a.val[v[0]]
-        const vb = v[0] === "__name__" ? b.key : b.val[v[0]]
+      for (const v of fields) {
+        const va = v[0] === "__id__" ? a.key : a.val[v[0]]
+        const vb = v[0] === "__id__" ? b.key : b.val[v[0]]
         const bareComp = this.compArr(va, vb)
         if (bareComp !== 0) {
           return (
@@ -229,6 +250,107 @@ class BPT {
     }
   }
 
+  async getValsReverseCursor(
+    node,
+    vals,
+    index = 0,
+    opt,
+    cache = {},
+    inRange = null,
+    stats
+  ) {
+    let i = index
+    let vals_len = 0
+    return async () => {
+      let ret = null
+      const getVal = async () => {
+        while (i >= 0) {
+          const v = node.vals[i]
+          const val = await this.data(v, cache, stats)
+          if (!isNil(opt.endAt)) {
+            if (this.comp(val, this.wrap(opt.endAt)) > 0) {
+              node = null
+              return
+            }
+          } else if (!isNil(opt.endBefore)) {
+            if (this.comp(val, this.wrap(opt.endBefore), true) >= 0) {
+              node = null
+              return
+            }
+          }
+          ret = val
+          if (!isNil(opt.limit) && vals.length === opt.limit) {
+            node = null
+            break
+          }
+          i--
+          break
+        }
+        if (isNil(ret)) {
+          if (!isNil(node?.prev)) {
+            node = await this.get(node.prev, stats)
+            i = node.vals.length - 1
+          } else {
+            node = null
+          }
+        }
+      }
+      while (!isNil(node) && isNil(ret)) await getVal()
+      return ret
+    }
+  }
+
+  async getValsCursor(
+    node,
+    vals,
+    index = 0,
+    opt,
+    cache = {},
+    inRange = null,
+    stats
+  ) {
+    let i = index
+    let vals_len = 0
+    return async () => {
+      let ret = null
+      const getVal = async () => {
+        while (i < node.vals.length) {
+          const v = node.vals[i]
+          const val = await this.data(v, cache, stats)
+          if (!isNil(opt.endAt)) {
+            if (this.comp(val, this.wrap(opt.endAt), true) < 0) {
+              node = null
+              break
+            }
+          } else if (!isNil(opt.endBefore)) {
+            if (this.comp(val, this.wrap(opt.endBefore)) <= 0) {
+              node = null
+              break
+            }
+          }
+          ret = val
+          vals_len++
+          if (!isNil(opt.limit) && vals_len === opt.limit) {
+            node = null
+            break
+          }
+          i++
+          break
+        }
+        if (isNil(ret)) {
+          if (!isNil(node?.next)) {
+            node = await this.get(node.next, stats)
+            i = 0
+          } else {
+            node = null
+          }
+        }
+      }
+      while (!isNil(node) && isNil(ret)) await getVal()
+      return ret
+    }
+  }
+
   async findIndex(_index, node, val, cache, stats) {
     let index = _index
     let isPrev = false
@@ -348,7 +470,7 @@ class BPT {
     }
   }
 
-  async range(opt = {}) {
+  async range(opt = {}, cursor = false) {
     opt.limit ??= 1000
     let stats = {}
     let start = opt.startAt ?? opt.startAfter
@@ -360,7 +482,7 @@ class BPT {
       stats,
       after
     )
-    if (isNil(first_node)) return []
+    if (isNil(first_node)) return cursor ? async () => null : []
     let vals = []
     let cache = {}
     let _node = first_node
@@ -467,17 +589,23 @@ class BPT {
         }
       }
     }
-    if (!isNil(_index))
-      await this[`getVals${opt.reverse === true ? "Reverse" : ""}`](
-        _node,
-        vals,
-        _index,
-        opt,
-        cache,
-        null,
-        stats
-      )
-    return vals
+    if (!cursor) {
+      if (!isNil(_index))
+        await this[`getVals${opt.reverse === true ? "Reverse" : ""}`](
+          _node,
+          vals,
+          _index,
+          opt,
+          cache,
+          null,
+          stats
+        )
+      return vals
+    } else {
+      return await this[
+        `getVals${opt.reverse === true ? "Reverse" : ""}Cursor`
+      ](_node, vals, _index, opt, cache, null, stats)
+    }
   }
 
   async searchByKey(key, stats) {
@@ -784,9 +912,9 @@ class BPT {
     if (!exists) node.vals.push(key)
   }
 
-  async insert(key, val, skipPut = false) {
+  async insert(key, val, skipPut = false, signer) {
     let stats = {}
-    await this.putData(key, val, stats)
+    await this.putData(key, val, stats, signer)
     let _val = { key, val }
     let node = await this.search(_val, undefined, stats)
     if (isNil(node)) {
@@ -870,13 +998,14 @@ class BPT {
     }
     return [isNewParent, parent]
   }
+
   pick(obj) {
     if (typeof this.sort_fields === "string") {
       return obj.val
     } else {
       let _obj = {}
       for (let v of pluck(0)(this.sort_fields)) {
-        _obj[v] = v === "__name__" ? obj.key : obj.val[v] ?? null
+        _obj[v] = v === "__id__" ? obj.key : obj.val[v] ?? null
       }
       return _obj
     }
